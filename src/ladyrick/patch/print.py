@@ -11,18 +11,14 @@ def patch_print():
     import traceback
 
     def custom_excepthook(exc_type, exc_value, exc_traceback):
-        new_print(
-            "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-        )
+        new_print("".join(traceback.format_exception(exc_type, exc_value, exc_traceback)))
 
     sys.excepthook = custom_excepthook
 
     import threading
 
     def custom_thread_excepthook(args):
-        exc_list = traceback.format_exception(
-            args.exc_type, args.exc_value, args.exc_traceback
-        )
+        exc_list = traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)
         new_print(f"Exception in thread {args.thread.name}:\n" + "".join(exc_list))
 
     threading.excepthook = custom_thread_excepthook

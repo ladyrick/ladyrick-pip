@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ladyrick"
-version = "0.2.0"
+version = "0.3.0"
 authors = [{ name = "ladyrick", email = "ladyrick@qq.com" }]
 description = "ladyrick's tools"
 readme = "README.md"
@@ -30,3 +30,10 @@ Repository = "https://github.com/ladyrick/ladyrick-pip"
 [tool.setuptools]
 packages = { find = { where = ["src"] } }
 package-dir = { "" = "src" }
+
+[project.scripts]
+pretty-print = "ladyrick.pretty_print:main"
+ladyrick-tee = "ladyrick.tee:main"
+
+[tool.black]
+line-length = 120

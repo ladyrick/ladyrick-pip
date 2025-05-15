@@ -19,11 +19,7 @@ def readlines(input_file=sys.stdin.buffer):
     buffer_size = 8192
 
     def reader() -> bytes:
-        return (
-            input_file.read1(buffer_size)
-            if hasattr(input_file, "read1")
-            else input_file.read(buffer_size)
-        )
+        return input_file.read1(buffer_size) if hasattr(input_file, "read1") else input_file.read(buffer_size)
 
     def get_idx(data: bytes, start=0):
         ridx = data.find(b"\r", start)
@@ -113,9 +109,7 @@ def main():
 
     parser = argparse.ArgumentParser("ladyrick-tee")
     parser.add_argument("--append", "-a", action="store_true")
-    parser.add_argument(
-        "output_files", nargs="*", help="output files. add '.gz' suffix to enable gzip"
-    )
+    parser.add_argument("output_files", nargs="*", help="output files. add '.gz' suffix to enable gzip")
     parser.add_argument(
         "--timestamp",
         "-t",
@@ -125,9 +119,7 @@ def main():
     )
 
     args = parser.parse_args()
-    timestamp = {"n": "no", "f": "file", "t": "terminal", "a": "all"}.get(
-        args.timestamp, args.timestamp
-    )
+    timestamp = {"n": "no", "f": "file", "t": "terminal", "a": "all"}.get(args.timestamp, args.timestamp)
 
     patch_rich_for_tee_carriage_return()
     tee(

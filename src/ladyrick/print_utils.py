@@ -82,9 +82,7 @@ def print_table(table: list[list[object]], col_sep=" ", row_sep="-", file=None):
     col_width = [
         max(
             len(line)
-            for line in itertools.chain.from_iterable(
-                [(row[i] if i < len(row) else []) for row in table_lines]
-            )
+            for line in itertools.chain.from_iterable([(row[i] if i < len(row) else []) for row in table_lines])
         )
         for i in range(max(len(row) for row in table_lines))
     ]
