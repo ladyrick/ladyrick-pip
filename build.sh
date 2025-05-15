@@ -2,7 +2,7 @@
 
 cd "$(dirname "$0")"
 
-pip install -U build twine --break-system-packages
+pip install -U build twine
 
 rm -rf dist
 python -m build
