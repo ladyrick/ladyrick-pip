@@ -48,7 +48,7 @@ class Printer:
                 v(self, obj, stream, level)
                 break
         else:
-            stream.write(f"{obj}")
+            stream.write(f"{obj!r}")
         if level == 0:
             stream.write("\n")
 
@@ -203,7 +203,8 @@ class Printer:
         return isinstance(obj, (str, bytes)) and len(obj) > 100
 
     def format_long_str(self, obj, stream: Writable, level: int):
-        stream.write(repr(obj[:100])[:-1] + f" ...{len(obj) - 100} more'")
+        r = repr(obj[:100])
+        stream.write(f"{r[:-1]} ...{len(obj) - 100} more{r[-1]}")
 
     _dispatch[is_long_str] = format_long_str
 
@@ -253,8 +254,8 @@ def main():
         parser = argparse.ArgumentParser("pretty_print")
         parser.add_argument("-i", action="store_true")
         parser.add_argument("files", nargs="*")
-        parser.add_argument("--ignore-errors", action="store_true")
-        parser.add_argument("--device", choices=["cpu", "cuda"], default=None)
+        parser.add_argument("-e", "--ignore-errors", action="store_true")
+        parser.add_argument("-d", "--device", choices=["cpu", "cuda"], default=None)
         args = parser.parse_args()
         interactive_mode = False
         if args.i:
@@ -280,7 +281,7 @@ def main():
     models = []
     for file in args.files:
         paths.append(file)
-        models.append(load_torch(file))
+        models.append(load_torch(file, args.ignore_errors, args.device))
     if len(models) == 1:
         pretty_print(models[0])
     else:
