@@ -1,6 +1,7 @@
 import functools
 import logging
 import os
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,6 +11,27 @@ T = TypeVar("T")
 Func = TypeVar("Func", bound=Callable)
 
 logger = logging.getLogger(__name__)
+
+
+def try_get_rank():
+    try:
+        return int(os.getenv("RANK", ""))
+    except Exception:
+        pass
+
+    if "torch" in sys.modules:
+        # 如果之前从来没 import 过，则放弃这种获取 rank 的方式
+        # 避免首次 import torch 导致的耗时
+        try:
+            import torch.distributed as dist
+
+            return dist.get_rank()
+        except Exception:
+            pass
+    return None
+
+
+_TS_LEN = len(str(int(time.time())))
 
 
 class Dump:
@@ -22,11 +44,12 @@ class Dump:
     def __call__(self, obj: object, name: str, log=True, enabled=True):
         if not enabled:
             return
-        assert "/" not in name
-        self.dump_dir.mkdir(parents=True, exist_ok=True)
-        rank = os.getenv("RANK", 0)
-        ts = time.time_ns()
+        # assert "/" not in name  # 通过允许传入绝对路径，来支持临时忽略 dump 目录
+        rank = try_get_rank() or "null"
+        ts = str(time.time_ns())
+        ts = f"{ts[:_TS_LEN]}.{ts[_TS_LEN:]}"
         filename = self.dump_dir / f"{name}-rank-{rank}-{ts}.pt"
+        filename.parent.mkdir(parents=True, exist_ok=True)
         import torch
 
         if log:
@@ -72,12 +95,13 @@ class Vars:
 
     @property
     def rank(self) -> int:
-        if self._rank is None:
-            try:
-                self._rank = int(os.getenv("RANK", ""))
-            except ValueError:
-                raise ValueError("cannot get torch rank") from None
-        return self._rank
+        if self._rank is not None:
+            return self._rank
+        r = try_get_rank()
+        if r is None:
+            raise RuntimeError("cannot get torch rank")
+        self._rank = r
+        return r
 
     def __setitem__(self, k: str | tuple[str, Any], v: Any):
         if isinstance(k, tuple):
