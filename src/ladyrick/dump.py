@@ -20,6 +20,8 @@ class Dump:
         self.dump_dir = Path(dump_dir)
 
     def __call__(self, obj: object, name: str, log=True, enabled=True):
+        if not enabled:
+            return
         assert "/" not in name
         self.dump_dir.mkdir(parents=True, exist_ok=True)
         rank = os.getenv("RANK", 0)
