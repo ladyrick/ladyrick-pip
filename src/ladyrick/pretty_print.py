@@ -24,7 +24,7 @@ def class_name(obj):
 
 class Writable(typing.Protocol):
     def write(self, s: str, /) -> int:
-        pass
+        return 0
 
 
 def get_tensor_data_repr(obj):
@@ -231,7 +231,7 @@ def pretty_print(model):
 
 def load_torch(
     filepath,
-    ignore_error=False,
+    ignore_errors=False,
     device: None | typing.Literal["cuda", "cpu"] = "cpu",
 ):
     global torch
@@ -241,7 +241,7 @@ def load_torch(
         filepath,
         map_location=device,
         weights_only=False,
-        pickle_module=PickleAnything if ignore_error else None,
+        pickle_module=PickleAnything if ignore_errors else None,
     )
 
 
@@ -275,19 +275,24 @@ def main():
                     "__proctitle__": getproctitle(),
                 },
             )
-    if interactive_mode:
-        global paths, models
+    add_to_globals = {}
     paths = []
     models = []
+    add_to_globals["paths"] = paths
+    add_to_globals["models"] = models
     for file in args.files:
         paths.append(file)
         models.append(load_torch(file, args.ignore_errors, args.device))
     if len(models) == 1:
+        add_to_globals["path"] = paths[0]
+        add_to_globals["model"] = models[0]
         pretty_print(models[0])
     else:
         for file, model in zip(paths, models):
             print(file)
             pretty_print(model)
+    if interactive_mode:
+        globals().update(add_to_globals)
 
 
 if __name__ == "__main__":
