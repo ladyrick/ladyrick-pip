@@ -255,7 +255,7 @@ def main():
         parser.add_argument("-i", action="store_true")
         parser.add_argument("files", nargs="*")
         parser.add_argument("-e", "--ignore-errors", action="store_true")
-        parser.add_argument("-d", "--device", choices=["cpu", "cuda"], default=None)
+        parser.add_argument("-d", "--device", choices=["cpu", "cuda"], default="cpu")
         args = parser.parse_args()
         interactive_mode = False
         if args.i:
