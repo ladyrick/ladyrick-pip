@@ -13,7 +13,7 @@ Func = TypeVar("Func", bound=Callable)
 logger = logging.getLogger(__name__)
 
 
-def try_get_rank():
+def try_get_rank() -> int | None:
     try:
         return int(os.getenv("RANK", ""))
     except Exception:
