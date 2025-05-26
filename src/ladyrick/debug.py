@@ -1,4 +1,5 @@
 import inspect
+import os
 import sys
 import types
 
@@ -30,10 +31,8 @@ def _get_patched_ipython_embed():
 
     namespace = IPython.embed.__globals__.copy()
 
-    # 4. 执行修改后的代码
     exec(source, namespace)
 
-    # 5. 获取新函数
     new_embed = namespace["embed"]
     _get_patched_ipython_embed.embed = new_embed
     return new_embed
@@ -43,6 +42,10 @@ def render_current_line(frame: types.FrameType, lines_around=4):
     frame_info = inspect.getframeinfo(frame)
     line_no = frame_info.lineno
     filename = frame_info.filename
+
+    str_lines: list[str] = []
+    if not os.path.isfile(filename):
+        return str_lines
 
     display_start_line = max(1, line_no - lines_around)
     display_end_line = line_no + lines_around
@@ -58,7 +61,6 @@ def render_current_line(frame: types.FrameType, lines_around=4):
     display_end_line = display_start_line + len(display_lines) - 1
 
     line_no_width = len(str(display_end_line))
-    str_lines: list[str] = []
     for i, line in enumerate(display_lines, display_start_line):
         str_line = " >>> " if i == line_no else "     "
         str_line += f"{i:{line_no_width}d} | {line.rstrip()}"
