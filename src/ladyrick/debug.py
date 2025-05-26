@@ -39,29 +39,35 @@ def _get_patched_ipython_embed():
     return new_embed
 
 
-def render_current_line(frame: types.FrameType):
+def render_current_line(frame: types.FrameType, lines_around=4):
     frame_info = inspect.getframeinfo(frame)
     line_no = frame_info.lineno
-    lines_around = 4
+    filename = frame_info.filename
 
-    source_lines, code_start_line = inspect.getsourcelines(frame)
-    code_end_line = code_start_line + len(source_lines) - 1
-    display_start_line = max(code_start_line, line_no - lines_around)
-    display_end_line = min(code_end_line, line_no + lines_around)
+    display_start_line = max(1, line_no - lines_around)
+    display_end_line = line_no + lines_around
+    display_lines = []
+    with open(filename) as f:
+        for i, line in enumerate(f, 1):
+            if i < display_start_line:
+                pass
+            elif i <= display_end_line:
+                display_lines.append(line)
+            else:
+                break
+    display_end_line = display_start_line + len(display_lines) - 1
 
-    display_lines = source_lines[display_start_line - code_start_line : display_end_line - code_start_line + 1]
-
-    width = len(str(display_start_line))
-    str_lines = []
+    line_no_width = len(str(display_end_line))
+    str_lines: list[str] = []
     for i, line in enumerate(display_lines, display_start_line):
         str_line = " >>> " if i == line_no else "     "
-        str_line += f"{i:{width}d} | {line.rstrip()}"
+        str_line += f"{i:{line_no_width}d} | {line.rstrip()}"
         str_lines.append(str_line)
-    return "\n".join(str_lines)
+    return str_lines
 
 
 def embed(depth=0):
     frame = sys._getframe(depth + 1)
-    lines = render_current_line(frame)
+    lines = "\n".join(render_current_line(frame))
     embed_func = _get_patched_ipython_embed()
     embed_func(depth=depth + 1, banner1=lines, confirm_exit=False, colors="Neutral")
