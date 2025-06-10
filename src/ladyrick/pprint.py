@@ -254,6 +254,9 @@ def main():
         parser.add_argument("-e", "--ignore-errors", action="store_true")
         parser.add_argument("-d", "--device", choices=["cpu", "cuda"], default="cpu")
         args = parser.parse_args()
+        if not args.files and not args.i:
+            parser.parse_args(["-h"])
+            return
         interactive_mode = False
         if args.i:
             os.execlpe(
