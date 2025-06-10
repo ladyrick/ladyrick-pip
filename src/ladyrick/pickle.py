@@ -4,6 +4,8 @@ import pickle
 import sys
 import types
 
+from ladyrick.utils import class_name
+
 _created_modules = {}
 
 
@@ -43,7 +45,7 @@ class _FakeClass(metaclass=_Meta):
             comps += [repr(a) for a in args]
         if kwargs:
             comps += [f"{k}={v!r}" for k, v in kwargs.items()]
-        return f"{self.__class__.__module__}.{self.__class__.__qualname__}({', '.join(comps)})"
+        return f"{class_name(self)}({', '.join(comps)})"
 
     def __setstate__(self, state):
         self.__class__.__load_method__ = "__setstate__"

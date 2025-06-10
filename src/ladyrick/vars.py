@@ -1,7 +1,5 @@
 import functools
 import logging
-import os
-import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,28 +11,9 @@ Func = TypeVar("Func", bound=Callable)
 logger = logging.getLogger(__name__)
 
 
-def try_get_rank() -> int | None:
-    try:
-        return int(os.getenv("RANK", ""))
-    except Exception:
-        pass
-
-    if "torch" in sys.modules:
-        # 如果之前从来没 import 过，则放弃这种获取 rank 的方式
-        # 避免首次 import torch 导致的耗时
-        try:
-            import torch.distributed as dist
-
-            return dist.get_rank()
-        except Exception:
-            pass
-    return None
-
-
-_TS_LEN = len(str(int(time.time())))
-
-
 class Dump:
+    _TS_LEN = len(str(int(time.time())))
+
     def __init__(self, dump_dir: str | Path):
         self.set_dump_dir(dump_dir)
 
@@ -45,9 +24,13 @@ class Dump:
         if not enabled:
             return
         # assert "/" not in name  # 通过允许传入绝对路径，来支持临时忽略 dump 目录
-        rank = try_get_rank() or "null"
+        from ladyrick.torch import rank as get_rank
+
+        rank = get_rank(True)
+        if rank is None:
+            rank = "null"
         ts = str(time.time_ns())
-        ts = f"{ts[:_TS_LEN]}.{ts[_TS_LEN:]}"
+        ts = f"{ts[:self._TS_LEN]}.{ts[self._TS_LEN:]}"
         filename = self.dump_dir / f"{name}-rank-{rank}-{ts}.pt"
         filename.parent.mkdir(parents=True, exist_ok=True)
         import torch
@@ -90,24 +73,13 @@ class Vars:
     def __init__(self, data: Optional[dict[str, Any]] = None):
         data = dict() if data is None else dict(data)
         super().__setattr__("_data", data)
-        super().__setattr__("_rank", None)
         self._data: dict[str, Any]
-
-    @property
-    def rank(self) -> int:
-        if self._rank is not None:
-            return self._rank
-        r = try_get_rank()
-        if r is None:
-            raise RuntimeError("cannot get torch rank")
-        self._rank = r
-        return r
 
     def __setitem__(self, k: str | tuple[str, Any], v: Any):
         if isinstance(k, tuple):
             assert len(k) == 2
             k = k[0]
-        assert not k.startswith("_") and k not in {"rank", "get", "ctx"}
+        assert not k.startswith("_") and k not in {"get", "ctx"}
         self._data[k] = v
 
     @overload
@@ -148,7 +120,7 @@ class Vars:
     @contextmanager
     def ctx(self, k: str, v: T) -> Generator[T, None, None]:
         assert k not in self._data, f"key {k} already exists"
-        assert not k.startswith("_") and k not in {"rank", "get", "ctx"}
+        assert not k.startswith("_") and k not in {"get", "ctx"}
         self[k] = v
         yield v
         del self[k]

@@ -1,10 +1,13 @@
 import builtins
 import itertools
 
+from ladyrick.typing import type_like
+
 builtin_print = builtins.print
 _stdout_console = _stderr_console = None
 
 
+@type_like(print)
 def parallel_print(
     *values: object,
     sep: str | None = " ",
@@ -19,6 +22,7 @@ def parallel_print(
     builtin_print(output_str, end="", file=file, flush=True)
 
 
+@type_like(print)
 def rich_print(
     *values: object,
     sep: str | None = " ",
@@ -100,16 +104,3 @@ def print_table(table: list[list[object]], col_sep=" ", row_sep="-", file=None):
             outputs.append(row_sep_long)
         outputs += _print_col_helper(row, col_width, col_sep)
     print("\n".join(outputs) + "\n", end="", flush=True)
-
-
-if __name__ == "__main__":
-    import torch
-
-    print_table(
-        [
-            [torch.ones(2, 2), torch.zeros(3, 3), torch.zeros(4, 1)],
-            [torch.ones(1, 3), torch.ones(3, 1)],
-        ],
-        col_sep="|",
-        row_sep="=",
-    )

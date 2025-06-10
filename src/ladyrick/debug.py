@@ -2,43 +2,60 @@ import inspect
 import os
 import sys
 import types
+from typing import Callable, ParamSpec, TypeVar
 
 import IPython
 import rich
 
+try:
+    from debugpy.server.api import breakpoint as debugpy_breakpoint
+except ImportError:
 
-def debugpy(rank=None, port=5678):
-    from ladyrick.dump import try_get_rank
+    def debugpy_breakpoint():
+        return None
 
-    if rank is None or rank == try_get_rank():
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+def patch_func_code(func: Callable[P, T]) -> Callable[[Callable[[str], str]], Callable[P, T]]:
+    def decorator(modify_code_func: Callable[[str], str]) -> Callable[P, T]:
+        source = inspect.getsource(func)
+        source_lines = source.split("\n")
+        indent = min(len(line) - len(line.lstrip()) for line in source_lines if line.strip())
+        if indent > 0:
+            source = "\n".join(line[indent:] for line in source_lines)
+        source = modify_code_func(source)
+        namespace = func.__globals__.copy()
+        exec(source, namespace)
+        new_func = namespace[func.__name__]
+
+        return new_func
+
+    return decorator
+
+
+@patch_func_code(debugpy_breakpoint)
+def _patched_breakpoint(source: str) -> str:
+    return source.replace("sys._getframe()", "sys._getframe(1)")
+
+
+def debugpy(rank: int | None = None, port=5678):
+    from ladyrick.torch import rank as get_rank
+
+    if rank is None or rank == get_rank():
         import debugpy
 
         debugpy.listen(("0.0.0.0", int(port)))
         rich.print(f"[green bold]debugpy: waiting for client to connect: port is {port}[/green bold]")
         debugpy.wait_for_client()
-        return debugpy.breakpoint
-    else:
-        return lambda: None
+        _patched_breakpoint()
 
 
-def _get_patched_ipython_embed():
-    if hasattr(_get_patched_ipython_embed, "embed"):
-        return _get_patched_ipython_embed.embed
-    source = inspect.getsource(IPython.embed)
-    source = source.replace("**kwargs):", "depth=0, **kwargs):")
-    source = source.replace("frame = sys._getframe(1)", "frame = sys._getframe(depth + 1)")
-    source = source.replace("stack_depth=2", "stack_depth=depth + 2")
-
-    namespace = IPython.embed.__globals__.copy()
-
-    exec(source, namespace)
-
-    new_embed = namespace["embed"]
-    _get_patched_ipython_embed.embed = new_embed
-    return new_embed
-
-
-def render_current_line(frame: types.FrameType, lines_around=4):
+def render_current_line(frame: types.FrameType | None = None, lines_around=4):
+    if frame is None:
+        frame = sys._getframe(1)
     frame_info = inspect.getframeinfo(frame)
     line_no = frame_info.lineno
     filename = frame_info.filename
@@ -68,8 +85,15 @@ def render_current_line(frame: types.FrameType, lines_around=4):
     return str_lines
 
 
+@patch_func_code(IPython.embed)
+def _patched_embed(source: str) -> str:
+    source = source.replace("**kwargs):", "depth=0, **kwargs):")
+    source = source.replace("frame = sys._getframe(1)", "frame = sys._getframe(depth + 1)")
+    source = source.replace("stack_depth=2", "stack_depth=depth + 2")
+    return source
+
+
 def embed(depth=0):
     frame = sys._getframe(depth + 1)
     lines = "\n".join(render_current_line(frame))
-    embed_func = _get_patched_ipython_embed()
-    embed_func(depth=depth + 1, banner1=lines, confirm_exit=False, colors="Neutral")
+    _patched_embed(depth=depth + 1, banner1=lines, confirm_exit=False, colors="Neutral")

@@ -12,14 +12,11 @@ from setproctitle import getproctitle, setproctitle
 
 from ladyrick.pickle import PickleAnything
 from ladyrick.print_utils import rich_print
+from ladyrick.utils import class_name
 
 if typing.TYPE_CHECKING:
     import numpy
     import torch
-
-
-def class_name(obj):
-    return f"{obj.__class__.__module__}.{obj.__class__.__qualname__}"
 
 
 class Writable(typing.Protocol):

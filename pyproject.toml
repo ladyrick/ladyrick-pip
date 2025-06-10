@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ladyrick"
-version = "0.3.3"
+version = "0.4.0"
 authors = [{ name = "ladyrick", email = "ladyrick@qq.com" }]
 description = "ladyrick's tools"
 readme = "README.md"
@@ -32,7 +32,7 @@ packages = { find = { where = ["src"] } }
 package-dir = { "" = "src" }
 
 [project.scripts]
-pretty-print = "ladyrick.pretty_print:main"
+pretty-print = "ladyrick.pprint:main"
 ladyrick-tee = "ladyrick.tee:main"
 
 [tool.black]

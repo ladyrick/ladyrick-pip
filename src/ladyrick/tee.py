@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-import datetime
 import enum
 import gzip
 import sys
 
 from ladyrick.print_utils import rich_print
+from ladyrick.utils import get_timestr
 
 
-def patch_rich_for_tee_carriage_return():
+def _patch_rich_for_tee_carriage_return():
     # 防止 rich 吞掉 '\r' 字符。
     import rich.control
 
@@ -44,15 +44,6 @@ def readlines(input_file=sys.stdin.buffer):
             yield buffer
     except KeyboardInterrupt:
         yield buffer
-
-
-TZ_UTC_8 = datetime.timezone(datetime.timedelta(seconds=8 * 3600), name="Asia/Shanghai")
-
-
-def get_timestr():
-    now = datetime.datetime.now(tz=TZ_UTC_8)
-    # 1970-01-01 08:00:00,000
-    return now.strftime(f"%Y-%m-%d %H:%M:%S,{now.microsecond // 1000:03d}")
 
 
 class TIMESTAMP(enum.Enum):
@@ -121,7 +112,7 @@ def main():
     args = parser.parse_args()
     timestamp = {"n": "no", "f": "file", "t": "terminal", "a": "all"}.get(args.timestamp, args.timestamp)
 
-    patch_rich_for_tee_carriage_return()
+    _patch_rich_for_tee_carriage_return()
     tee(
         output_files=args.output_files,
         append=args.append,
