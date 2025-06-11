@@ -247,6 +247,7 @@ def main():
         args = argparse.Namespace(**json.loads(os.environ.pop("__pretty_print_interactive_args__")))
         interactive_mode = True
         setproctitle(os.environ.pop("__proctitle__"))
+        sys.path[:] = json.loads(os.environ.pop("__sys_path__"))
     else:
         parser = argparse.ArgumentParser("pretty_print")
         parser.add_argument("-i", action="store_true")
@@ -255,10 +256,11 @@ def main():
         parser.add_argument("-d", "--device", choices=["cpu", "cuda"], default="cpu")
         args = parser.parse_args()
         if not args.files and not args.i:
-            parser.parse_args(["-h"])
+            parser.parse_args(["-h"])  # nothing to do. print a help
             return
         interactive_mode = False
         if args.i:
+            dumps = lambda obj: json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
             os.execlpe(
                 sys.executable,
                 sys.executable,
@@ -271,8 +273,9 @@ def main():
                 *args.files,
                 {
                     **os.environ,
-                    "__pretty_print_interactive_args__": json.dumps(vars(args)),
+                    "__pretty_print_interactive_args__": dumps(vars(args)),
                     "__proctitle__": getproctitle(),
+                    "__sys_path__": dumps(sys.path),
                 },
             )
     add_to_globals = {}
