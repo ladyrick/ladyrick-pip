@@ -10,7 +10,7 @@ import typing
 
 from setproctitle import getproctitle, setproctitle
 
-from ladyrick.pickle import PickleAnything
+from ladyrick.loader import FORMATS, auto_load
 from ladyrick.print_utils import rich_print
 from ladyrick.utils import class_name
 
@@ -34,7 +34,7 @@ class Printer:
     def __init__(self, indent="  "):
         self.indent = indent
 
-    _dispatch = {}
+    _dispatch = typing.OrderedDict()
 
     def print(self, obj, stream: typing.Optional[Writable] = None):
         self.format_object(obj, stream or sys.stdout, 0)
@@ -49,10 +49,10 @@ class Printer:
         if level == 0:
             stream.write("\n")
 
-    def is_dict(self, obj):
-        return isinstance(obj, dict)
+    def is_map(self, obj):
+        return isinstance(obj, typing.Mapping)
 
-    def format_dict(self, obj, stream: Writable, level: int):
+    def format_map(self, obj, stream: Writable, level: int):
         class_name = obj.__class__.__name__
         if class_name == "dict":
             stream.write("{")
@@ -62,12 +62,14 @@ class Printer:
             stream.write(f"\n{self.indent * (level + 1)}{k!r}: ")
             self.format_object(v, stream, level + 1)
             stream.write(",")
+        if obj:
+            stream.write(f"\n{self.indent * level}")
         if class_name == "dict":
-            stream.write(f"\n{self.indent * level}}}")
+            stream.write("}")
         else:
-            stream.write(f"\n{self.indent * level}}})")
+            stream.write("})")
 
-    _dispatch[is_dict] = format_dict
+    _dispatch[is_map] = format_map
 
     def is_tensor(self, obj):
         return class_name(obj) in {
@@ -100,10 +102,50 @@ class Printer:
 
     _dispatch[is_ndarray] = format_ndarray
 
+    def is_namedtuple(self, obj):
+        return isinstance(obj, tuple) and hasattr(obj, "_fields")
+
+    def format_namedtuple(self, obj, stream: Writable, level: int):
+        stream.write(f"{obj.__class__.__name__}(\n")
+        for k, v in zip(obj._fields, obj):
+            stream.write(f"{self.indent * (level + 1)}{k}=")
+            self.format_object(v, stream, level + 1)
+            stream.write(",\n")
+        stream.write(f"{self.indent * level})")
+
+    _dispatch[is_namedtuple] = format_namedtuple  # must before is_simple_sequence
+
     def is_simple_sequence(self, obj):
         return isinstance(obj, (list, tuple, set))
 
     def format_simple_sequence(self, obj, stream: Writable, level: int):
+        class_name = obj.__class__.__name__
+        if not obj:
+            if class_name in ("list", "tuple", "set"):
+                stream.write(f"{obj!r}")
+            elif isinstance(obj, list):
+                stream.write(f"{class_name}([])")
+            elif isinstance(obj, tuple):
+                stream.write(f"{class_name}(())")
+            else:  # set
+                stream.write(f"{class_name}(set())")
+            return
+
+        if class_name not in ("list", "tuple", "set"):
+            if isinstance(obj, list):
+                stream.write(f"{class_name}([")
+            elif isinstance(obj, tuple):
+                stream.write(f"{class_name}((")
+            else:  # set
+                stream.write(f"{class_name}({{")
+        else:
+            if isinstance(obj, list):
+                stream.write("[")
+            elif isinstance(obj, tuple):
+                stream.write("(")
+            else:  # set
+                stream.write("{")
+
         last_type = None
         items_has_same_simple_type = True
         max_render_len = 10
@@ -123,22 +165,6 @@ class Printer:
                 is_list_of_str = False
                 break
 
-        class_name = obj.__class__.__name__
-        if class_name not in ("list", "tuple", "set"):
-            if isinstance(obj, list):
-                stream.write(f"{class_name}([")
-            elif isinstance(obj, tuple):
-                stream.write(f"{class_name}((")
-            else:  # set
-                stream.write(f"{class_name}({{")
-        else:
-            if isinstance(obj, list):
-                stream.write("[")
-            elif isinstance(obj, tuple):
-                stream.write("(")
-            else:  # set
-                stream.write("{")
-
         if items_has_same_simple_type:
             if len(obj) > max_render_len:
                 for i, item in zip(range(max_render_len), obj):
@@ -150,8 +176,7 @@ class Printer:
                 for i, item in enumerate(obj):
                     stream.write(f"{item!r}" if i == 0 else f", {item!r}")
         elif is_list_of_str and (
-            len(obj) == 1
-            or (len(obj) < max_render_len and sum(len(s) for _, s in zip(range(max_render_len), obj)) < 80)
+            len(obj) < max_render_len and sum(len(s) for _, s in zip(range(max_render_len), obj)) < 80
         ):
             if len(obj) == 1 and isinstance(obj, tuple):
                 stream.write(f"{next(iter(obj))!r},")
@@ -172,7 +197,7 @@ class Printer:
             elif isinstance(obj, tuple):
                 stream.write("))")
             else:  # set
-                stream.write("}}")
+                stream.write("}})")
         else:
             if isinstance(obj, list):
                 stream.write("]")
@@ -226,20 +251,13 @@ def pretty_print(model):
     Printer().print(model, FakeRichStream())
 
 
-def load_torch(
-    filepath,
-    ignore_errors=False,
-    device: None | typing.Literal["cuda", "cpu"] = "cpu",
-):
-    global torch
-    import torch
-
-    return torch.load(
-        filepath,
-        map_location=device,
-        weights_only=False,
-        pickle_module=PickleAnything if ignore_errors else None,
-    )
+@dataclasses.dataclass
+class load_failed:
+    file: str
+    format: str
+    ignore_errors: bool
+    raw: bool
+    exc: Exception
 
 
 def main():
@@ -253,7 +271,8 @@ def main():
         parser.add_argument("-i", action="store_true")
         parser.add_argument("files", nargs="*")
         parser.add_argument("-e", "--ignore-errors", action="store_true")
-        parser.add_argument("-d", "--device", choices=["cpu", "cuda"], default="cpu")
+        parser.add_argument("-r", "--raw", action="store_true", help="no map_location")
+        parser.add_argument("-f", "--format", choices=FORMATS, default=FORMATS[0])
         args = parser.parse_args()
         if not args.files and not args.i:
             parser.parse_args(["-h"])  # nothing to do. print a help
@@ -285,7 +304,11 @@ def main():
     add_to_globals["models"] = models
     for file in args.files:
         paths.append(file)
-        models.append(load_torch(file, args.ignore_errors, args.device))
+        try:
+            model = auto_load(file, args.format, args.ignore_errors, args.raw)
+        except Exception as e:
+            model = load_failed(file, args.format, args.ignore_errors, args.raw, e)
+        models.append(model)
     if len(models) == 1:
         add_to_globals["path"] = paths[0]
         add_to_globals["model"] = models[0]
@@ -295,7 +318,15 @@ def main():
             print(file)
             pretty_print(model)
     if interactive_mode:
+        if "torch" in sys.modules:
+            add_to_globals["torch"] = sys.modules["torch"]
         globals().update(add_to_globals)
+
+        from IPython.core.magic import register_line_magic
+
+        @register_line_magic
+        def pp(line):
+            pretty_print(eval(line))
 
 
 if __name__ == "__main__":
