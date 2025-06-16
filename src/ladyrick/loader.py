@@ -1,16 +1,34 @@
 import json
 from os import PathLike
 from pathlib import Path
-from typing import Literal, TypeAlias
+from typing import Literal, Final
 
 import ladyrick.pickle as pickle_anything
 
-FORMAT_TYPE: TypeAlias = Literal["auto", "pt", "torch", "st", "safetensors", "pkl", "pickle", "json", "jsonl"]
 
-FORMATS: list[FORMAT_TYPE] = ["auto", "pt", "torch", "st", "safetensors", "pkl", "pickle", "json", "jsonl"]
+FORMATS: Final = (
+    "auto",
+    "pt",
+    "torch",
+    "st",
+    "safetensors",
+    "pkl",
+    "pickle",
+    "json",
+    "jsonl",
+    "yml",
+    "yaml",
+)
 
 
-def auto_load(filepath: str | PathLike[str], format: FORMAT_TYPE = "auto", ignore_errors=False, raw=True):
+def auto_load(
+    filepath: str | PathLike[str],
+    format: Literal[
+        "auto", "pt", "torch", "st", "safetensors", "pkl", "pickle", "json", "jsonl", "yml", "yaml"
+    ] = "auto",
+    ignore_errors=False,
+    raw=True,
+):
     suffix = Path(filepath).suffix
 
     def _check(suffix_in: tuple[str, ...], fmt_in: tuple[str, ...]):
@@ -28,6 +46,14 @@ def auto_load(filepath: str | PathLike[str], format: FORMAT_TYPE = "auto", ignor
     if _check((".jsonl",), ("jsonl",)):
         with open(filepath) as f:
             return [json.loads(line) for line in f]
+    if _check((".yml", ".yaml"), ("yml", "yaml")):
+        try:
+            import yaml
+        except ImportError:
+            raise RuntimeError("please 'pip install pyyaml' to load yaml file")
+        with open(filepath) as f:
+            docs = list(yaml.safe_load_all(f))
+            return docs[0] if len(docs) == 1 else docs
     raise RuntimeError(f"load failed! cannot decide filetype of {filepath}")
 
 
