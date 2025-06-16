@@ -103,4 +103,4 @@ def print_table(table: list[list[object]], col_sep=" ", row_sep="-", file=None):
         if row_sep_long and outputs:
             outputs.append(row_sep_long)
         outputs += _print_col_helper(row, col_width, col_sep)
-    print("\n".join(outputs) + "\n", end="", flush=True)
+    print("\n".join(outputs) + "\n", end="", flush=True, file=file)
