@@ -5,7 +5,7 @@ import sys
 
 def main():
     if os.uname().sysname != "Linux":
-        print("Only support uname Linux")
+        print("only support uname Linux")
         sys.exit(1)
     verbose = ""
     root_pid = 0
@@ -15,7 +15,7 @@ def main():
         elif arg.isdigit():
             root_pid = int(arg)
         else:
-            print(f"Invalid args: {arg}")
+            print(f"invalid args: {arg}")
             sys.exit(1)
     if root_pid in (0, 1):
         cmd = ["ps", verbose + "afxopid,user,cmd"]
