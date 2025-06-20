@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ladyrick"
-version = "0.4.1"
+version = "0.5.0"
 authors = [{ name = "ladyrick", email = "ladyrick@qq.com" }]
 description = "ladyrick's tools"
 readme = "README.md"
@@ -33,7 +33,9 @@ package-dir = { "" = "src" }
 
 [project.scripts]
 pretty-print = "ladyrick.pprint:main"
-ladyrick-tee = "ladyrick.tee:main"
+ladyrick-tee = "ladyrick.cli.tee:main"
+multi-ssh = "ladyrick.cli.multi_ssh:main"
+psf = "ladyrick.cli.psf:main"
 
 [tool.black]
 line-length = 120
