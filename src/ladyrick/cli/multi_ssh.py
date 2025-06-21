@@ -1,17 +1,9 @@
-import argparse
-import dataclasses
-import itertools
 import json
 import os
-import pathlib
-import random
 import select
-import shlex
 import signal
 import subprocess
 import sys
-import time
-import uuid
 
 
 def log(msg):
@@ -37,19 +29,18 @@ def remote_head():
     extra_envs = json.loads(sys.argv[2])
     os.environ.update(extra_envs)
 
-    parser = argparse.ArgumentParser(prog=REMOTE_HEAD_PROG_NAME)
-    parser.add_argument("cmd", type=str, nargs="+", help="cmd")
-    args = parser.parse_args(sys.argv[3:])
+    cmd = sys.argv[3:]
     try:
         from setproctitle import setproctitle
 
-        setproctitle(" ".join([REMOTE_HEAD_PROG_NAME] + args.cmd))
+        setproctitle(" ".join([REMOTE_HEAD_PROG_NAME] + cmd))
     except ImportError:
         pass
 
     # start child process
     child = subprocess.Popen(
-        args.cmd,
+        cmd,
+        stdin=subprocess.PIPE,
         stdout=sys.stdout,
         stderr=sys.stderr,
         start_new_session=True,
@@ -97,6 +88,15 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == REMOTE_HEAD_P
 
 
 # ----- remote_head end ----- #
+if True:
+    import argparse
+    import dataclasses
+    import itertools
+    import pathlib
+    import random
+    import shlex
+    import time
+    import uuid
 
 
 @dataclasses.dataclass
@@ -213,10 +213,6 @@ def signal_repeat_checker(sig_to_check, count, duration):
     return checker
 
 
-def get_common_envs():
-    pass
-
-
 def main():
     parser = argparse.ArgumentParser(prog="multi-ssh", add_help=False)
     parser.add_argument("-h", type=str, action="append", help="hosts to connect. order is 1")
@@ -225,12 +221,17 @@ def main():
     parser.add_argument("-l", type=str, help="ssh login User")
     parser.add_argument("-o", type=str, action="append", help="ssh options")
     parser.add_argument("-F", type=str, help="ssh config file")
-    parser.add_argument("cmd", type=str, nargs="+", help="cmd")
     parser.add_argument("--hosts-config", type=str, action="append", help="hosts config string. order is 2")
     parser.add_argument("--hosts-config-file", type=str, action="append", help="hosts config file. order is 3")
     parser.add_argument("--help", action="help", default=argparse.SUPPRESS, help="show this help message and exit")
+    parser.add_argument("cmd", type=str, nargs=argparse.REMAINDER, help="cmd")
 
     args = parser.parse_args()
+
+    if not args.cmd:
+        print("cmd is required\n")
+        parser.print_help()
+        sys.exit(1)
 
     hosts = [
         Host(hn, args.F, args.l, args.p, args.i, args.o)
@@ -254,6 +255,11 @@ def main():
                 options=hn.get("options"),
             )
         )
+
+    if not hosts:
+        print("hosts is required. specify hosts by -h, --hosts-config or --hosts-config-file\n")
+        parser.print_help()
+        sys.exit(1)
 
     executors = [RemoteExecutor(host, args.cmd) for host in hosts]
 
