@@ -158,18 +158,20 @@ class RemoteExecutor:
     def set_envs(cls, executors: list["RemoteExecutor"]):
         assert executors
         envs = {}
-
-        cmd = cls.make_ssh_cmd(executors[0].host, "hostname -I")
-        master_ips = subprocess.check_output(cmd).decode().split()
-        priority = {"172": 0, "192": 1, "10": 2}
-        master_addr, cur_p = None, -1
-        for ip in master_ips:
-            prefix = ip.split(".", 1)[0]
-            p = priority.get(prefix, 3)
-            if p > cur_p:
-                master_addr, cur_p = ip, p
-        assert master_addr is not None
-        envs["MASTER_ADDR"] = master_addr
+        if len(executors) > 1:
+            cmd = cls.make_ssh_cmd(executors[0].host, "hostname -I")
+            master_ips = subprocess.check_output(cmd).decode().split()
+            priority = {"172": 0, "192": 1, "10": 2}
+            master_addr, cur_p = None, -1
+            for ip in master_ips:
+                prefix = ip.split(".", 1)[0]
+                p = priority.get(prefix, 3)
+                if p > cur_p:
+                    master_addr, cur_p = ip, p
+            assert master_addr is not None
+            envs["MASTER_ADDR"] = master_addr
+        else:
+            envs["MASTER_ADDR"] = "127.0.0.1"
         envs["MASTER_PORT"] = str(random.randint(20000, 40000))
         envs["WORLD_SIZE"] = str(len(executors))
 

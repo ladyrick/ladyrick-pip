@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ladyrick"
-version = "0.5.1"
+version = "0.5.2"
 authors = [{ name = "ladyrick", email = "ladyrick@qq.com" }]
 description = "ladyrick's tools"
 readme = "README.md"
@@ -36,6 +36,7 @@ pretty-print = "ladyrick.pprint:main"
 ladyrick-tee = "ladyrick.cli.tee:main"
 multi-ssh = "ladyrick.cli.multi_ssh:main"
 psf = "ladyrick.cli.psf:main"
+allgather = "ladyrick.allgather:main"
 
 [tool.black]
 line-length = 120
