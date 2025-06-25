@@ -251,6 +251,17 @@ def pretty_print(model):
     Printer().print(model, FakeRichStream())
 
 
+def reg_ipython_cmd():
+    from IPython.core.magic import register_line_magic
+
+    @register_line_magic
+    def pp(line: str):
+        if line.strip():
+            pretty_print(eval(line))
+        else:
+            rich_print("pp is pretty_print.\nusage: pp <exps>")
+
+
 @dataclasses.dataclass
 class load_failed:
     file: str
@@ -321,12 +332,7 @@ def main():
         if "torch" in sys.modules:
             add_to_globals["torch"] = sys.modules["torch"]
         globals().update(add_to_globals)
-
-        from IPython.core.magic import register_line_magic
-
-        @register_line_magic
-        def pp(line):
-            pretty_print(eval(line))
+        reg_ipython_cmd()
 
 
 if __name__ == "__main__":
