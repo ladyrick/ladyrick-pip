@@ -140,6 +140,7 @@ class RemoteExecutor:
         return opts
 
     def start(self):
+        assert self.process is None
         code = pathlib.Path(__file__).read_text().split("# ----- remote_head end ----- #")[0].strip()
         remote_cmd = shlex.join(
             [
@@ -191,7 +192,8 @@ class RemoteExecutor:
             e.envs["RANK"] = str(i)
 
     def send_signal(self, sig):
-        if self.process and self.process.poll() is None and self.process.stdin and not self.process.stdin.closed:
+        assert self.process is not None
+        if self.process.poll() is None and self.process.stdin and not self.process.stdin.closed:
             sig_name = signal.Signals(sig).name
             log(f"writing to stdin: SIGNAL {sig_name}")
             try:
@@ -199,6 +201,10 @@ class RemoteExecutor:
                 self.process.stdin.flush()
             except (BrokenPipeError, OSError) as e:
                 log(e)
+
+    def poll(self):
+        assert self.process is not None
+        return self.process.poll()
 
 
 def signal_repeat_checker(sig_to_check, count, duration):
@@ -298,7 +304,7 @@ def main():
     for sig in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2]:
         signal.signal(sig, handle_signal)
 
-    while any(e.process.poll() is None for e in executors if e.process):
+    while any([e.poll() is None for e in executors if e.process]):
         time.sleep(0.5)
     log("finished")
 
