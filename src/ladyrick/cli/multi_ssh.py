@@ -191,15 +191,14 @@ class RemoteExecutor:
             e.envs["RANK"] = str(i)
 
     def send_signal(self, sig):
-        if self.process:
+        if self.process and self.process.poll() is None and self.process.stdin and not self.process.stdin.closed:
             sig_name = signal.Signals(sig).name
-            if self.process.stdin and not self.process.stdin.closed:
-                log(f"writing to stdin: SIGNAL {sig_name}")
-                try:
-                    self.process.stdin.write(f"SIGNAL {sig_name}\n".encode())
-                    self.process.stdin.flush()
-                except (BrokenPipeError, OSError) as e:
-                    log(e)
+            log(f"writing to stdin: SIGNAL {sig_name}")
+            try:
+                self.process.stdin.write(f"SIGNAL {sig_name}\n".encode())
+                self.process.stdin.flush()
+            except (BrokenPipeError, OSError) as e:
+                log(e)
 
 
 def signal_repeat_checker(sig_to_check, count, duration):
