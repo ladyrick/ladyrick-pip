@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import select
 import signal
 import subprocess
@@ -110,15 +111,20 @@ class Host:
 
 
 class RemoteExecutor:
-    def __init__(self, host: Host, command: list[str]):
+    def __init__(self, host: Host, command: list[str], envs: dict | None = None):
         self.host = host
         self.command = command
         self.envs = {}
+        if envs:
+            for k, v in envs.items():
+                if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", k):
+                    raise ValueError(f"invalid env name: {k!r}")
+                self.envs[k] = v
         self.process = None
 
     @classmethod
     def make_ssh_cmd(cls, host: Host, cmd: str):
-        opts = ["/usr/bin/env", "ssh", "-qT", "-oStrictHostKeyChecking=no"]
+        opts = ["/usr/bin/env", "ssh", "-T", "-oStrictHostKeyChecking=no"]
         if host.config_file is not None:
             opts.append(f"-F{host.config_file}")
         if host.User is not None:
@@ -223,6 +229,7 @@ def main():
     parser.add_argument("-l", type=str, help="ssh login User")
     parser.add_argument("-o", type=str, action="append", help="ssh options")
     parser.add_argument("-F", type=str, help="ssh config file")
+    parser.add_argument("-e", "--env", type=str, action="append", help="extra envs")
     parser.add_argument("--hosts-config", type=str, action="append", help="hosts config string. order is 2")
     parser.add_argument("--hosts-config-file", type=str, action="append", help="hosts config file. order is 3")
     parser.add_argument("--help", action="help", default=argparse.SUPPRESS, help="show this help message and exit")
@@ -263,7 +270,15 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    executors = [RemoteExecutor(host, args.cmd) for host in hosts]
+    envs = {}
+    if args.env:
+        for e in args.env:
+            p = e.split("=", 1)
+            if len(p) == 1:
+                p.append("")
+            envs[p[0]] = p[1]
+
+    executors = [RemoteExecutor(host, args.cmd, envs) for host in hosts]
 
     RemoteExecutor.set_envs(executors)
 
