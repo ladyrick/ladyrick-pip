@@ -21,7 +21,7 @@ def force_kill(child: subprocess.Popen, child_pgid):
         child.kill()  # kill -9
 
 
-REMOTE_HEAD_PROG_NAME = "ladyrick-remote-head"
+REMOTE_HEAD_PROG_NAME = "ladyrick/multi-ssh/remote-head"
 
 
 def remote_head():
