@@ -1,10 +1,13 @@
 import builtins
 import itertools
+import sys
 
 from ladyrick.typing import type_like
 
 builtin_print = builtins.print
 _stdout_console = _stderr_console = None
+_stdout_isatty = sys.stdout.isatty()
+_stderr_isatty = sys.stderr.isatty()
 
 
 @type_like(print)
@@ -37,23 +40,19 @@ def rich_print(
     if "\x1b" in output_str or "\x00" in output_str:  # \e or \0
         builtin_print(output_str, end="", file=file, flush=True)
     else:
-        import sys
-
         from rich.console import Console
 
         global _stdout_console, _stderr_console
-        if file is not None and file is not sys.stdout and file is not sys.stderr:
-            builtin_print(output_str, file=file, flush=True)
-            return
-        if file is None or file is sys.stdout:
+        if _stdout_isatty and (file is None or file is sys.stdout):
             if _stdout_console is None:
                 _stdout_console = Console(soft_wrap=True, markup=False)
-            _console = _stdout_console
-        else:
+            _stdout_console.print(output_str, end="")
+        elif _stderr_isatty and file is sys.stderr:
             if _stderr_console is None:
                 _stderr_console = Console(soft_wrap=True, markup=False, stderr=True)
-            _console = _stderr_console
-        _console.print(output_str, end="")
+            _stderr_console.print(output_str, end="")
+        else:
+            builtin_print(output_str, end="", file=file, flush=True)
 
 
 def _print_col_helper(obj_lines: list[list[str]], col_width: list[int], sep: str):

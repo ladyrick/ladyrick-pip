@@ -96,8 +96,11 @@ if True:
     import pathlib
     import random
     import shlex
+    import threading
     import time
     import uuid
+
+    import rich
 
 
 @dataclasses.dataclass
@@ -111,10 +114,11 @@ class Host:
 
 
 class RemoteExecutor:
-    def __init__(self, host: Host, command: list[str], envs: dict | None = None):
+    def __init__(self, host: Host, command: list[str], envs: dict | None = None, write_fd=None):
         self.host = host
         self.command = command
         self.envs = {}
+        self.write_fd = write_fd
         if envs:
             for k, v in envs.items():
                 if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", k):
@@ -156,8 +160,8 @@ class RemoteExecutor:
         self.process = subprocess.Popen(
             self.make_ssh_cmd(self.host, remote_cmd),
             stdin=subprocess.PIPE,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
+            stdout=self.write_fd if self.write_fd is not None else sys.stdout,
+            stderr=self.write_fd if self.write_fd is not None else sys.stderr,
             start_new_session=True,
         )
 
@@ -239,7 +243,16 @@ def main():
     parser.add_argument("-e", "--env", type=str, action="append", help="extra envs")
     parser.add_argument("--hosts-config", type=str, action="append", help="hosts config string. order is 2")
     parser.add_argument("--hosts-config-file", type=str, action="append", help="hosts config file. order is 3")
+    parser.add_argument("--log-file", type=str, help="save all outputs to a file")
     parser.add_argument("--help", action="help", default=argparse.SUPPRESS, help="show this help message and exit")
+    parser.add_argument(
+        "--timestamp",
+        "-t",
+        choices=["no", "n", "file", "f", "terminal", "t", "all", "a"],
+        help="control where to add timestamp",
+        default="no",
+    )
+    parser.add_argument("--no-rich", action="store_false", help="disable rich output", dest="rich")
     parser.add_argument("cmd", type=str, nargs=argparse.REMAINDER, help="cmd")
 
     args = parser.parse_args()
@@ -285,14 +298,13 @@ def main():
                 p.append("")
             envs[p[0]] = p[1]
 
-    executors = [RemoteExecutor(host, args.cmd, envs) for host in hosts]
+    read_fd, write_fd = os.pipe()
+    executors = [RemoteExecutor(host, args.cmd, envs, write_fd) for host in hosts]
 
     RemoteExecutor.set_envs(executors)
 
     for executor in executors:
         executor.start()
-
-    import rich
 
     checker = signal_repeat_checker(signal.SIGINT, duration=1)
 
@@ -317,8 +329,27 @@ def main():
     for sig in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2]:
         signal.signal(sig, handle_signal)
 
-    while any([e.poll() is None for e in executors if e.process]):
-        time.sleep(0.5)
+    def watch_dog():
+        try:
+            while any([e.poll() is None for e in executors if e.process]):
+                time.sleep(0.5)
+        finally:
+            os.close(write_fd)
+
+    threading.Thread(target=watch_dog, daemon=True).start()
+
+    from ladyrick.cli.tee import TIMESTAMP, tee
+
+    timestamp = {"n": "no", "f": "file", "t": "terminal", "a": "all"}.get(args.timestamp, args.timestamp)
+    try:
+        tee(
+            read_fd,
+            output_files=args.log_file,
+            timestamp=TIMESTAMP(timestamp),
+            rich=args.rich,
+        )
+    finally:
+        os.close(read_fd)
     log("finished")
 
 
