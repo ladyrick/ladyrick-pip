@@ -202,12 +202,17 @@ class RemoteExecutor:
             except (BrokenPipeError, OSError) as e:
                 log(e)
 
+    def terminate(self):
+        if self.process is not None and self.process.poll() is None:
+            log("terminate RemoteExecutor")
+            self.process.terminate()
+
     def poll(self):
         assert self.process is not None
         return self.process.poll()
 
 
-def signal_repeat_checker(sig_to_check, count, duration):
+def signal_repeat_checker(sig_to_check, duration: float):
     last_int_signal_time = []
 
     def checker(sig: signal.Signals):
@@ -217,11 +222,8 @@ def signal_repeat_checker(sig_to_check, count, duration):
             threadhold = cur_time - duration
             last_int_signal_time = [t for t in last_int_signal_time if t >= threadhold]
             last_int_signal_time.append(cur_time)
-
-            if len(last_int_signal_time) >= count:
-                log(f"received {sig_to_check.name} for {count} times or more in {duration} second(s)")
-                return True
-        return False
+            return len(last_int_signal_time)
+        return 0
 
     return checker
 
@@ -290,16 +292,27 @@ def main():
     for executor in executors:
         executor.start()
 
-    checker = signal_repeat_checker(signal.SIGINT, count=3, duration=1)
+    import rich
+
+    checker = signal_repeat_checker(signal.SIGINT, duration=1)
 
     def handle_signal(sig, frame):
-        if checker(sig):
+        log(f"received signal {sig}")
+        sig_count = checker(sig)
+        if sig_count >= 3:
             sig = signal.SIGUSR2
-            log("\nTry to froce kill remote processes")
+            if sig_count == 3:
+                rich.print("\n[bold magenta]Can't wait. Try to froce kill remote processes...[/bold magenta]")
         else:
-            log(f"\nReceived {signal.Signals(sig).name}, forwarding...")
+            rich.print(
+                f"\n[bold green]Received {signal.Signals(sig).name}, forwarding to remote processes...[/bold green]"
+            )
         for executor in executors:
             executor.send_signal(sig)
+        if sig_count >= 4:
+            rich.print("\n[bold red]Really Can't wait!!! Froce kill local processes and exiting right now![/bold red]")
+            for executor in executors:
+                executor.terminate()
 
     for sig in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2]:
         signal.signal(sig, handle_signal)
