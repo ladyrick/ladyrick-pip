@@ -2,6 +2,7 @@ import inspect
 import os
 import sys
 import types
+from subprocess import check_output
 from typing import Callable, ParamSpec, TypeVar
 
 import IPython
@@ -48,7 +49,8 @@ def debugpy(rank: int | None = None, port=5678):
         import debugpy
 
         debugpy.listen(("0.0.0.0", int(port)))
-        rich.print(f"[green bold]debugpy: waiting for client to connect: port is {port}[/green bold]")
+        ips = check_output(["hostname", "-I"]).decode()
+        rich.print(f"[green bold]debugpy: waiting for client to connect: ip is {ips}, port is {port}[/green bold]")
         debugpy.wait_for_client()
         _patched_breakpoint()
 

@@ -33,6 +33,8 @@ def __getattr__(name):
         m = import_module("ladyrick.torch")
     elif name in ("type_like",):
         m = import_module("ladyrick.typing")
+    elif name in ("auto_load",):
+        m = import_module("ladyrick.loader")
     else:
         raise AttributeError(name)
     return getattr(m, name)
@@ -40,6 +42,7 @@ def __getattr__(name):
 
 if TYPE_CHECKING:
     from ladyrick.debug import debugpy, embed  # noqa
+    from ladyrick.loader import auto_load  # noqa
     from ladyrick.pprint import pretty_print  # noqa
     from ladyrick.print_utils import parallel_print, print_col, print_table, rich_print  # noqa
     from ladyrick.torch import print_rank_0, print_rank_last, rank  # noqa
