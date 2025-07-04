@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
+import argparse
 import enum
 import gzip
 import os
 import sys
+from functools import partial
+from typing import BinaryIO, TypeAlias
 
-from ladyrick.print_utils import rich_print, builtin_print
-from ladyrick.utils import get_timestr
+from ladyrick.print_utils import rich_print
+from ladyrick.utils import EnumAction, get_timestr
 
 
 def _patch_rich_for_tee_carriage_return():
@@ -16,15 +19,24 @@ def _patch_rich_for_tee_carriage_return():
     rich.control._CONTROL_STRIP_TRANSLATE.pop(13)
 
 
-def readlines(input_file=sys.stdin.buffer):
+FileDescriptor: TypeAlias = int
+
+
+def readlines(input_file: BinaryIO | FileDescriptor = sys.stdin.buffer):
     buffer_size = 8192
 
-    def reader() -> bytes:
-        if isinstance(input_file, int):
-            return os.read(input_file, buffer_size)
-        if hasattr(input_file, "read1"):
-            return input_file.read1(buffer_size)
-        return input_file.read(buffer_size)
+    if isinstance(input_file, FileDescriptor):
+        # 跟 read1 表现有点类似，性能也差不多
+        reader = partial(os.read, input_file, buffer_size)
+    elif hasattr(input_file, "read1"):
+        # stdin 走的这个分支。
+        # 会自动按 \r 和 \n 切分，除非时间间隔非常短。
+        reader = partial(getattr(input_file, "read1"), buffer_size)
+    else:
+        # readline 相比 read，会自动按 \n 切分，除非时间间隔非常短。
+        # 但无法按 \r 切分。
+        # 但总比 read 啥都不切好。
+        reader = partial(input_file.readline, buffer_size)
 
     def get_next_start(data: bytes, start=0):
         ridx = data.find(b"\r", start)
@@ -39,8 +51,8 @@ def readlines(input_file=sys.stdin.buffer):
             return ridx + 1
         return min(ridx, nidx) + 1
 
+    buffer = b""
     try:
-        buffer = b""
         while data := reader():
             if buffer:
                 data = buffer + data
@@ -49,10 +61,11 @@ def readlines(input_file=sys.stdin.buffer):
                 yield data[s:next_s]
                 s = next_s
             buffer = data[s:]
+    except KeyboardInterrupt:
+        pass
+    finally:
         if buffer:
             yield buffer
-    except KeyboardInterrupt:
-        yield buffer
 
 
 class TIMESTAMP(enum.Enum):
@@ -63,16 +76,20 @@ class TIMESTAMP(enum.Enum):
 
 
 def tee(
-    input_file=sys.stdin.buffer,
+    input_file: BinaryIO | FileDescriptor = sys.stdin.buffer,
     output_files: None | str | list[str] = None,
     append=False,
     timestamp: TIMESTAMP = TIMESTAMP.NO,
     rich=True,
+    prefix: None | str = None,
 ):
-    if rich:
-        _print = rich_print
-    else:
-        _print = builtin_print
+    def _print(line: bytes):
+        if rich:
+            rich_print(line.decode(), end="")
+        else:
+            sys.stdout.buffer.write(line)
+            sys.stdout.buffer.flush()
+
     opened_files = []
     if isinstance(output_files, str):
         output_files = [output_files]
@@ -85,19 +102,28 @@ def tee(
             opened_files.append((is_gzip, gzip.open(f, mode)))
         else:
             opened_files.append((is_gzip, open(f, mode)))
+
+    prefix_bytes = f"[{prefix}] ".encode() if prefix else b""
+
     try:
         gzip_data_len = 0
         gzip_flush_block_size = 1024 * 1024  # 1MB
         for line in readlines(input_file):
-            timestr = ""
+            timebytes = b""
             if timestamp in {TIMESTAMP.FILE, TIMESTAMP.TERMINAL, TIMESTAMP.ALL}:
-                timestr = f"[{get_timestr()}] "
+                timebytes = f"[{get_timestr()}] ".encode()
             if timestamp in {TIMESTAMP.TERMINAL, TIMESTAMP.ALL}:
-                _print(timestr + line.decode(), end="", flush=True)
+                if prefix_bytes:
+                    _print(timebytes + prefix_bytes + line)
+                else:
+                    _print(timebytes + line)
             else:
-                _print(line.decode(), end="", flush=True)
+                if prefix_bytes:
+                    _print(prefix_bytes + line)
+                else:
+                    _print(line)
             if timestamp in {TIMESTAMP.FILE, TIMESTAMP.ALL}:
-                line = timestr.encode() + line
+                line = timebytes + line
             gzip_data_len += len(line)
             # 写入所有输出文件
             for is_gzip, f in opened_files:
@@ -114,29 +140,34 @@ def tee(
 
 
 def main():
-    import argparse
-
     parser = argparse.ArgumentParser("ladyrick-tee")
     parser.add_argument("--append", "-a", action="store_true")
     parser.add_argument("output_files", nargs="*", help="output files. add '.gz' suffix to enable gzip")
     parser.add_argument(
         "--timestamp",
         "-t",
-        choices=["no", "n", "file", "f", "terminal", "t", "all", "a"],
+        action=EnumAction,
+        type=TIMESTAMP,
         help="control where to add timestamp",
-        default="no",
+        default=TIMESTAMP.NO,
+    )
+    parser.add_argument(
+        "--prefix",
+        "-p",
+        type=str,
+        help="print prefix for each line",
     )
     parser.add_argument("--no-rich", action="store_false", help="disable rich output", dest="rich")
 
     args = parser.parse_args()
-    timestamp = {"n": "no", "f": "file", "t": "terminal", "a": "all"}.get(args.timestamp, args.timestamp)
 
     _patch_rich_for_tee_carriage_return()
     tee(
         output_files=args.output_files,
         append=args.append,
-        timestamp=TIMESTAMP(timestamp),
+        timestamp=args.timestamp,
         rich=args.rich,
+        prefix=args.prefix,
     )
 
 

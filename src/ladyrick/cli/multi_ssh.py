@@ -1,106 +1,32 @@
+import argparse
+import dataclasses
+import functools
+import itertools
 import json
 import os
+import pathlib
+import random
 import re
-import select
+import shlex
 import signal
 import subprocess
 import sys
+import threading
+import time
+import uuid
+
+import rich
+
+from ladyrick.cli.tee import TIMESTAMP, tee
+from ladyrick.utils import EnumAction, get_timestr
+
+MULTI_SSH_DEBUG = False
 
 
 def log(msg):
-    # print(msg, flush=True)
+    if MULTI_SSH_DEBUG:
+        print(msg, flush=True)
     pass
-
-
-def force_kill(child: subprocess.Popen, child_pgid):
-    os.killpg(child_pgid, signal.SIGTERM)
-    try:
-        child.wait(timeout=1)
-    except subprocess.TimeoutExpired:
-        pass
-    if child.poll() is None:
-        child.kill()  # kill -9
-
-
-REMOTE_HEAD_PROG_NAME = "ladyrick/multi-ssh/remote-head"
-
-
-def remote_head():
-    os.environ["PYTHONUNBUFFERED"] = "1"
-    extra_envs = json.loads(sys.argv[2])
-    os.environ.update(extra_envs)
-
-    cmd = sys.argv[3:]
-    try:
-        from setproctitle import setproctitle
-
-        setproctitle(" ".join([REMOTE_HEAD_PROG_NAME] + cmd))
-    except ImportError:
-        pass
-
-    # start child process
-    child = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=sys.stdout,
-        stderr=sys.stderr,
-        start_new_session=True,
-    )
-
-    child_pgid = os.getpgid(child.pid)
-
-    def handle_signal(sig, frame=None):
-        if sig == signal.SIGUSR2:
-            # SIGUSR2 trigger force_kill manually
-            log("SIGUSR2 received. force kill")
-            force_kill(child, child_pgid)
-        else:
-            log(f"forward signal {sig} to {child.pid}")
-            try:
-                os.kill(child.pid, sig)
-            except ProcessLookupError as e:
-                log(str(e))
-
-    for sig in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2]:
-        signal.signal(sig, handle_signal)
-
-    # main loop: watch child process and stdin
-    while True:
-        if child.poll() is not None:
-            return child.returncode
-
-        rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
-        if sys.stdin in rlist:
-            cmd = sys.stdin.readline().strip()
-            if cmd.startswith("SIGNAL "):
-                sig_name = cmd[7:]
-                try:
-                    sig = getattr(signal, sig_name)
-                except AttributeError:
-                    log(f"unknown signal {sig_name}")
-                else:
-                    handle_signal(sig)
-            else:
-                log(f"unknown cmd {cmd!r}")
-
-
-if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == REMOTE_HEAD_PROG_NAME:
-    sys.exit(remote_head())
-
-
-# ----- remote_head end ----- #
-if True:
-    import argparse
-    import dataclasses
-    import itertools
-    import pathlib
-    import random
-    import shlex
-    import threading
-    import time
-    import uuid
-
-    import rich
 
 
 @dataclasses.dataclass
@@ -114,11 +40,12 @@ class Host:
 
 
 class RemoteExecutor:
-    def __init__(self, host: Host, command: list[str], envs: dict | None = None, write_fd=None):
+    def __init__(self, host: Host, command: list[str], envs: dict | None = None, log_handler=None):
         self.host = host
         self.command = command
         self.envs = {}
-        self.write_fd = write_fd
+        self.log_handler = log_handler
+        self.write_fd = None
         if envs:
             for k, v in envs.items():
                 if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", k):
@@ -145,32 +72,42 @@ class RemoteExecutor:
 
     def start(self):
         assert self.process is None
-        code = pathlib.Path(__file__).read_text().split("# ----- remote_head end ----- #")[0].strip()
+        code = (pathlib.Path(__file__).parent / "multi_ssh_remote_head.py").read_text()
         remote_cmd = shlex.join(
             [
                 "python3",
                 "-uc",
                 code,
-                REMOTE_HEAD_PROG_NAME,
                 json.dumps(self.envs, separators=(",", ":")),
                 *self.command,
             ]
         )
 
+        if self.log_handler is not None:
+
+            def wrapper(handler, fd):
+                handler(fd)
+                os.close(fd)
+
+            read_fd, write_fd = os.pipe()
+            self.write_fd = write_fd  # for later close it
+            threading.Thread(target=wrapper, args=(self.log_handler, read_fd), daemon=True).start()
+        else:
+            write_fd = 1  # stdout
         self.process = subprocess.Popen(
             self.make_ssh_cmd(self.host, remote_cmd),
             stdin=subprocess.PIPE,
-            stdout=self.write_fd if self.write_fd is not None else sys.stdout,
-            stderr=self.write_fd if self.write_fd is not None else sys.stderr,
+            stdout=write_fd,
+            stderr=write_fd,
             start_new_session=True,
         )
 
     @classmethod
-    def set_envs(cls, executors: list["RemoteExecutor"]):
+    def set_envs(cls, executors: list["RemoteExecutor"], timestr: str):
         assert executors
         envs = {}
         if len(executors) > 1:
-            cmd = cls.make_ssh_cmd(executors[0].host, "hostname -I")
+            cmd = cls.make_ssh_cmd(executors[0].host, "hostname -I 2>/dev/null")
             master_ips = subprocess.check_output(cmd).decode().split()
             priority = {"172": 0, "192": 1, "10": 2}
             master_addr, cur_p = None, -1
@@ -179,17 +116,21 @@ class RemoteExecutor:
                 p = priority.get(prefix, 3)
                 if p > cur_p:
                     master_addr, cur_p = ip, p
-            assert master_addr is not None
-            envs["MASTER_ADDR"] = master_addr
+            if master_addr is not None:
+                envs["MASTER_ADDR"] = master_addr
+            else:
+                print("WARNING: cannot get MASTER_ADDR. use 127.0.0.1")
+                envs["MASTER_ADDR"] = "127.0.0.1"
         else:
             envs["MASTER_ADDR"] = "127.0.0.1"
         envs["MASTER_PORT"] = str(random.randint(20000, 40000))
         envs["WORLD_SIZE"] = str(len(executors))
 
         envs["UNIQ_ID"] = str(uuid.uuid4())
-        from ladyrick.utils import get_timestr
 
-        envs["TIMESTAMP"] = get_timestr(1)
+        envs["TIMESTAMP"] = timestr
+        if MULTI_SSH_DEBUG:
+            envs["MULTI_SSH_DEBUG"] = "1"
 
         for i, e in enumerate(executors):
             e.envs.update(envs)
@@ -213,7 +154,10 @@ class RemoteExecutor:
 
     def poll(self):
         assert self.process is not None
-        return self.process.poll()
+        poll = self.process.poll()
+        if poll is not None and self.write_fd is not None:
+            os.close(self.write_fd)
+        return poll
 
 
 def signal_repeat_checker(sig_to_check, duration: float):
@@ -243,16 +187,18 @@ def main():
     parser.add_argument("-e", "--env", type=str, action="append", help="extra envs")
     parser.add_argument("--hosts-config", type=str, action="append", help="hosts config string. order is 2")
     parser.add_argument("--hosts-config-file", type=str, action="append", help="hosts config file. order is 3")
-    parser.add_argument("--log-file", type=str, help="save all outputs to a file")
+    parser.add_argument("--log-dir", "-d", type=str, help="save outputs to a log dir")
+    parser.add_argument("--rank-prefix", "-r", action="store_true", help="print a prefix to identity different rank")
     parser.add_argument("--help", action="help", default=argparse.SUPPRESS, help="show this help message and exit")
     parser.add_argument(
         "--timestamp",
         "-t",
-        choices=["no", "n", "file", "f", "terminal", "t", "all", "a"],
+        action=EnumAction,
+        type=TIMESTAMP,
         help="control where to add timestamp",
-        default="no",
+        default=TIMESTAMP.NO,
     )
-    parser.add_argument("--no-rich", action="store_false", help="disable rich output", dest="rich")
+    parser.add_argument("--no-rich", "-n", action="store_false", help="disable rich output", dest="rich")
     parser.add_argument("cmd", type=str, nargs=argparse.REMAINDER, help="cmd")
 
     args = parser.parse_args()
@@ -298,10 +244,25 @@ def main():
                 p.append("")
             envs[p[0]] = p[1]
 
-    read_fd, write_fd = os.pipe()
-    executors = [RemoteExecutor(host, args.cmd, envs, write_fd) for host in hosts]
+    timestr = get_timestr(1)
+    if args.log_dir:
+        pathlib.Path(args.log_dir, timestr).mkdir(parents=True, exist_ok=True)
 
-    RemoteExecutor.set_envs(executors)
+    width = len(str(len(hosts)))
+
+    def get_log_handler(i):
+        log_file = args.log_dir and os.path.join(args.log_dir, timestr, f"rank-{i}.log")
+        return functools.partial(
+            tee,
+            output_files=log_file,
+            timestamp=args.timestamp,
+            rich=args.rich,
+            prefix=args.rank_prefix and f"rank-{i:<{width}}",
+        )
+
+    executors = [RemoteExecutor(host, args.cmd, envs, get_log_handler(i)) for i, host in enumerate(hosts)]
+
+    RemoteExecutor.set_envs(executors, timestr)
 
     for executor in executors:
         executor.start()
@@ -329,27 +290,9 @@ def main():
     for sig in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2]:
         signal.signal(sig, handle_signal)
 
-    def watch_dog():
-        try:
-            while any([e.poll() is None for e in executors if e.process]):
-                time.sleep(0.5)
-        finally:
-            os.close(write_fd)
+    while any([e.poll() is None for e in executors if e.process]):
+        time.sleep(0.5)
 
-    threading.Thread(target=watch_dog, daemon=True).start()
-
-    from ladyrick.cli.tee import TIMESTAMP, tee
-
-    timestamp = {"n": "no", "f": "file", "t": "terminal", "a": "all"}.get(args.timestamp, args.timestamp)
-    try:
-        tee(
-            read_fd,
-            output_files=args.log_file,
-            timestamp=TIMESTAMP(timestamp),
-            rich=args.rich,
-        )
-    finally:
-        os.close(read_fd)
     log("finished")
 
 
