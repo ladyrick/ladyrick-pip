@@ -31,12 +31,6 @@ def remote_head():
     os.environ.update(extra_envs)
 
     cmd = sys.argv[2:]
-    try:
-        from setproctitle import setproctitle
-
-        setproctitle(" ".join([REMOTE_HEAD_PROG_NAME] + cmd))
-    except ImportError:
-        pass
 
     # start child process
     child = subprocess.Popen(
@@ -55,7 +49,7 @@ def remote_head():
             log("SIGUSR2 received. force kill")
             force_kill(child, child_pgid)
         else:
-            log(f"forward signal {sig} to {child.pid}")
+            log(f"forward signal {signal.Signals(sig).name}:{sig} to {child.pid}")
             try:
                 os.kill(child.pid, sig)
             except ProcessLookupError as e:
@@ -65,13 +59,15 @@ def remote_head():
         signal.signal(sig, handle_signal)
 
     # main loop: watch child process and stdin
+    control_fd = os.fdopen(9)
     while True:
         if child.poll() is not None:
             return child.returncode
 
-        rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
-        if sys.stdin in rlist:
-            cmd = sys.stdin.readline().strip()
+        rlist, _, _ = select.select([control_fd], [], [], 0.1)
+        if control_fd in rlist:
+            cmd = control_fd.readline().strip()
+            log(f"remote header receive command: {cmd}")
             if cmd.startswith("SIGNAL "):
                 sig_name = cmd[7:]
                 try:

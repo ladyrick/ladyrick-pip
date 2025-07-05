@@ -1,6 +1,8 @@
 import argparse
+import base64
 import dataclasses
 import functools
+import gzip
 import itertools
 import json
 import os
@@ -29,6 +31,9 @@ def log(msg):
     pass
 
 
+REMOTE_HEAD_PROG_NAME = "ladyrick/multi-ssh/remote-head"
+
+
 @dataclasses.dataclass
 class Host:
     HostName: str
@@ -41,17 +46,18 @@ class Host:
 
 class RemoteExecutor:
     def __init__(self, host: Host, command: list[str], envs: dict | None = None, log_handler=None):
+        self.process = None
         self.host = host
         self.command = command
         self.envs = {}
         self.log_handler = log_handler
+        self.log_thread = None
         self.write_fd = None
         if envs:
             for k, v in envs.items():
                 if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", k):
                     raise ValueError(f"invalid env name: {k!r}")
                 self.envs[k] = v
-        self.process = None
 
     @classmethod
     def make_ssh_cmd(cls, host: Host, cmd: str):
@@ -72,33 +78,36 @@ class RemoteExecutor:
 
     def start(self):
         assert self.process is None
-        code = (pathlib.Path(__file__).parent / "multi_ssh_remote_head.py").read_text()
-        remote_cmd = shlex.join(
-            [
-                "python3",
-                "-uc",
-                code,
-                json.dumps(self.envs, separators=(",", ":")),
-                *self.command,
-            ]
+        remote_proc_title = " ".join([REMOTE_HEAD_PROG_NAME] + self.command)
+        argv_patched_code = "import sys;sys.argv[:]=[{!r},{!r},*{!r}];{}".format(
+            REMOTE_HEAD_PROG_NAME,
+            json.dumps(self.envs, separators=(",", ":"), ensure_ascii=True),
+            self.command,
+            (pathlib.Path(__file__).parent / "multi_ssh_remote_head.py").read_text(),
         )
+        b85_code = base64.b85encode(gzip.compress(argv_patched_code.encode())).decode()
+        code = f'c=b"{b85_code}";import base64,gzip,json,os,sys;os.dup2(0,9);read_fd,write_fd=os.pipe();os.write(write_fd,gzip.decompress(base64.b85decode(c)));os.close(write_fd);os.dup2(read_fd,0);os.close(read_fd);os.execvp(sys.executable,[{json.dumps(remote_proc_title)}])'
+        remote_cmd = shlex.join(["python3", "-uc", code])
 
         if self.log_handler is not None:
 
-            def wrapper(handler, fd):
-                handler(fd)
-                os.close(fd)
+            def wrapper(handler, read_fd):
+                handler(read_fd)
+                os.close(read_fd)
 
             read_fd, write_fd = os.pipe()
             self.write_fd = write_fd  # for later close it
-            threading.Thread(target=wrapper, args=(self.log_handler, read_fd), daemon=True).start()
+
+            # 有时候子进程结束了，log 还没输出完，所以不能用 daemon=True，会丢 log
+            self.log_thread = threading.Thread(target=wrapper, args=(self.log_handler, read_fd))
+            self.log_thread.start()
         else:
-            write_fd = 1  # stdout
+            write_fd = sys.stdout
         self.process = subprocess.Popen(
             self.make_ssh_cmd(self.host, remote_cmd),
             stdin=subprocess.PIPE,
             stdout=write_fd,
-            stderr=write_fd,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
 
@@ -148,7 +157,8 @@ class RemoteExecutor:
                 log(e)
 
     def terminate(self):
-        if self.process is not None and self.process.poll() is None:
+        assert self.process is not None
+        if self.process.poll() is None:
             log("terminate RemoteExecutor")
             self.process.terminate()
 
@@ -157,7 +167,14 @@ class RemoteExecutor:
         poll = self.process.poll()
         if poll is not None and self.write_fd is not None:
             os.close(self.write_fd)
+            self.write_fd = None
         return poll
+
+    def join_log_thread(self):
+        assert self.process is not None
+        if self.log_thread is not None:
+            assert self.poll() is not None
+            self.log_thread.join()
 
 
 def signal_repeat_checker(sig_to_check, duration: float):
@@ -290,8 +307,11 @@ def main():
     for sig in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2]:
         signal.signal(sig, handle_signal)
 
-    while any([e.poll() is None for e in executors if e.process]):
+    while any([e.poll() is None for e in executors]):
         time.sleep(0.5)
+
+    for e in executors:
+        e.join_log_thread()
 
     log("finished")
 
