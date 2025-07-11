@@ -2,19 +2,10 @@ import inspect
 import os
 import sys
 import types
-from subprocess import check_output
 from typing import Callable, ParamSpec, TypeVar
 
 import IPython
 import rich
-
-try:
-    from debugpy.server.api import breakpoint as debugpy_breakpoint
-except ImportError:
-
-    def debugpy_breakpoint():
-        return None
-
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -37,20 +28,24 @@ def patch_func_code(func: Callable[P, T]) -> Callable[[Callable[[str], str]], Ca
     return decorator
 
 
-@patch_func_code(debugpy_breakpoint)
-def _patched_breakpoint(source: str) -> str:
-    return source.replace("sys._getframe()", "sys._getframe(1)")
-
-
 def debugpy(rank: int | None = None, port=5678):
     from ladyrick.torch import rank as get_rank
 
     if rank is None or rank == get_rank():
         import debugpy
+        from debugpy.server.api import breakpoint as debugpy_breakpoint
+
+        from ladyrick.utils import get_local_ip
+
+        @patch_func_code(debugpy_breakpoint)
+        def _patched_breakpoint(source: str) -> str:
+            return source.replace("sys._getframe()", "sys._getframe(1)")
 
         debugpy.listen(("0.0.0.0", int(port)))
-        ips = check_output(["hostname", "-I"]).decode()
-        rich.print(f"[green bold]debugpy: waiting for client to connect: ip is {ips}, port is {port}[/green bold]")
+
+        rich.print(
+            f"[green bold][debugpy] waiting for client to connect: ip is {get_local_ip()}, port is {port}[/green bold]"
+        )
         debugpy.wait_for_client()
         _patched_breakpoint()
 
@@ -99,3 +94,29 @@ def embed(depth=0):
     frame = sys._getframe(depth + 1)
     lines = "\n".join(render_current_line(frame))
     _patched_embed(depth=depth + 1, banner1=lines, confirm_exit=False, colors="Neutral")
+
+
+def pdb(frame: types.FrameType | None = None):
+    from IPython.terminal.debugger import TerminalPdb
+
+    TerminalPdb().set_trace(frame or sys._getframe().f_back)
+
+
+def remote_pdb(frame: types.FrameType | None = None, port=9963):
+    from IPython.terminal.debugger import TerminalPdb
+
+    from ladyrick.terminal import forward_terminal
+
+    ft = forward_terminal(port=port)
+
+    pdb = TerminalPdb()
+    old_do_continue = pdb.do_continue
+
+    def new_do_continue(*a, **k):
+        ft.stop()
+        return old_do_continue(*a, **k)
+
+    pdb.do_c = pdb.do_cont = pdb.do_continue = new_do_continue
+
+    ft.start()
+    pdb.set_trace(frame or sys._getframe().f_back)

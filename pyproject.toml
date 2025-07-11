@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ladyrick"
-version = "0.5.9"
+version = "0.6.0"
 authors = [{ name = "ladyrick", email = "ladyrick@qq.com" }]
 description = "ladyrick's tools"
 readme = "README.md"
@@ -41,3 +41,6 @@ calc = "ladyrick.cli.calc:main"
 
 [tool.black]
 line-length = 120
+
+[tool.isort]
+line_length = 120

@@ -1,6 +1,7 @@
 import argparse
 import datetime
 import enum
+import socket
 
 
 def class_name(obj: object):
@@ -57,3 +58,13 @@ class EnumAction(argparse.Action):
             enum_values = self._enum(values)
 
         setattr(namespace, self.dest, enum_values)
+
+
+def get_local_ip() -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+        return local_ip
+    except Exception:
+        return "127.0.0.1"
