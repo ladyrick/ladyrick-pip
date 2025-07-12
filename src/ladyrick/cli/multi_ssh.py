@@ -17,9 +17,8 @@ import threading
 import time
 import uuid
 
-import rich
-
 from ladyrick.cli.tee import TIMESTAMP, tee
+from ladyrick.print_utils import rich_print
 from ladyrick.utils import EnumAction, get_timestr
 
 MULTI_SSH_DEBUG = False
@@ -292,15 +291,22 @@ def main():
         if sig_count >= 3:
             sig = signal.SIGUSR2
             if sig_count == 3:
-                rich.print("\n[bold magenta]Can't wait. Try to froce kill remote processes...[/bold magenta]")
+                rich_print(
+                    "\n[bold magenta]Can't wait. Try to froce kill remote processes...[/bold magenta]",
+                    markup=True,
+                )
         else:
-            rich.print(
-                f"\n[bold green]Received {signal.Signals(sig).name}, forwarding to remote processes...[/bold green]"
+            rich_print(
+                f"\n[bold green]Received {signal.Signals(sig).name}, forwarding to remote processes...[/bold green]",
+                markup=True,
             )
         for executor in executors:
             executor.send_signal(sig)
         if sig_count >= 4:
-            rich.print("\n[bold red]Really Can't wait!!! Froce kill local processes and exiting right now![/bold red]")
+            rich_print(
+                "\n[bold red]Really Can't wait!!! Froce kill local processes and exiting right now![/bold red]",
+                markup=True,
+            )
             for executor in executors:
                 executor.terminate()
 

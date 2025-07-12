@@ -5,7 +5,8 @@ import types
 from typing import Callable, ParamSpec, TypeVar
 
 import IPython
-import rich
+
+from ladyrick.print_utils import rich_print
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -43,8 +44,9 @@ def debugpy(rank: int | None = None, port=5678):
 
         debugpy.listen(("0.0.0.0", int(port)))
 
-        rich.print(
-            f"[green bold][debugpy] waiting for client to connect: ip is {get_local_ip()}, port is {port}[/green bold]"
+        rich_print(
+            f"[green bold][debugpy] waiting for client to connect: ip is {get_local_ip()}, port is {port}[/green bold]",
+            markup=True,
         )
         debugpy.wait_for_client()
         _patched_breakpoint()

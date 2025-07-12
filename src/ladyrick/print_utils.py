@@ -25,13 +25,13 @@ def parallel_print(
     builtin_print(output_str, end="", file=file, flush=True)
 
 
-@type_like(print)
 def rich_print(
     *values: object,
     sep: str | None = " ",
     end: str | None = "\n",
     file=None,
     flush=False,
+    markup=False,
 ):
     sep = " " if sep is None else sep
     end = " " if end is None else end
@@ -45,11 +45,11 @@ def rich_print(
         global _stdout_console, _stderr_console
         if _stdout_isatty and (file is None or file is sys.stdout):
             if _stdout_console is None:
-                _stdout_console = Console(soft_wrap=True, markup=False)
+                _stdout_console = Console(soft_wrap=True, markup=markup)
             _stdout_console.print(output_str, end="")
         elif _stderr_isatty and file is sys.stderr:
             if _stderr_console is None:
-                _stderr_console = Console(soft_wrap=True, markup=False, stderr=True)
+                _stderr_console = Console(soft_wrap=True, markup=markup, stderr=True)
             _stderr_console.print(output_str, end="")
         else:
             builtin_print(output_str, end="", file=file, flush=True)
