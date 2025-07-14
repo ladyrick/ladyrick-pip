@@ -4,8 +4,6 @@ import sys
 import types
 from typing import Callable, ParamSpec, TypeVar
 
-import IPython
-
 from ladyrick.print_utils import rich_print
 
 P = ParamSpec("P")
@@ -33,23 +31,27 @@ def debugpy(rank: int | None = None, port=5678):
     from ladyrick.torch import rank as get_rank
 
     if rank is None or rank == get_rank():
-        import debugpy
+        import debugpy as debugpy_module
         from debugpy.server.api import breakpoint as debugpy_breakpoint
 
         from ladyrick.utils import get_local_ip
 
-        @patch_func_code(debugpy_breakpoint)
-        def _patched_breakpoint(source: str) -> str:
-            return source.replace("sys._getframe()", "sys._getframe(1)")
+        if not hasattr(debugpy, "_patched_breakpoint"):
 
-        debugpy.listen(("0.0.0.0", int(port)))
+            @patch_func_code(debugpy_breakpoint)
+            def _patched_breakpoint(source: str) -> str:
+                return source.replace("sys._getframe()", "sys._getframe(1)")
+
+            debugpy._patched_breakpoint = _patched_breakpoint
+
+        debugpy_module.listen(("0.0.0.0", int(port)))
 
         rich_print(
             f"[green bold][debugpy] waiting for client to connect: ip is {get_local_ip()}, port is {port}[/green bold]",
             markup=True,
         )
-        debugpy.wait_for_client()
-        _patched_breakpoint()
+        debugpy_module.wait_for_client()
+        debugpy._patched_breakpoint()
 
 
 def render_current_line(frame: types.FrameType | None = None, lines_around=4):
@@ -84,18 +86,21 @@ def render_current_line(frame: types.FrameType | None = None, lines_around=4):
     return str_lines
 
 
-@patch_func_code(IPython.embed)
-def _patched_embed(source: str) -> str:
-    source = source.replace("**kwargs):", "depth=0, **kwargs):")
-    source = source.replace("frame = sys._getframe(1)", "frame = sys._getframe(depth + 1)")
-    source = source.replace("stack_depth=2", "stack_depth=depth + 2")
-    return source
-
-
 def embed(depth=0):
     frame = sys._getframe(depth + 1)
     lines = "\n".join(render_current_line(frame))
-    _patched_embed(depth=depth + 1, banner1=lines, confirm_exit=False, colors="Neutral")
+    if not hasattr(embed, "_patched_embed"):
+        import IPython
+
+        @patch_func_code(IPython.embed)
+        def _patched_embed(source: str) -> str:
+            source = source.replace("**kwargs):", "depth=0, **kwargs):")
+            source = source.replace("frame = sys._getframe(1)", "frame = sys._getframe(depth + 1)")
+            source = source.replace("stack_depth=2", "stack_depth=depth + 2")
+            return source
+
+        embed._patched_embed = _patched_embed
+    embed._patched_embed(depth=depth + 1, banner1=lines, confirm_exit=False, colors="Neutral")
 
 
 def pdb(frame: types.FrameType | None = None):
@@ -105,11 +110,14 @@ def pdb(frame: types.FrameType | None = None):
 
 
 def remote_pdb(frame: types.FrameType | None = None, port=9963):
-    from IPython.terminal.debugger import TerminalPdb
-
     from ladyrick.terminal import forward_terminal
 
     ft = forward_terminal(port=port)
+    ft.start()
+
+    # 必须在 ft.start() 之后 import
+    # 不要在外面 import IPython，会提前初始化全局变量，误以为 stdout 不是 tty
+    from IPython.terminal.debugger import TerminalPdb
 
     pdb = TerminalPdb()
     old_do_continue = pdb.do_continue
@@ -120,5 +128,4 @@ def remote_pdb(frame: types.FrameType | None = None, port=9963):
 
     pdb.do_c = pdb.do_cont = pdb.do_continue = new_do_continue
 
-    ft.start()
     pdb.set_trace(frame or sys._getframe().f_back)

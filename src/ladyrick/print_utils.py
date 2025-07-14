@@ -43,11 +43,11 @@ def rich_print(
         from rich.console import Console
 
         global _stdout_console, _stderr_console
-        if (markup or _stdout_isatty) and (file is None or file is sys.stdout):
+        if (file is None or file is sys.stdout) and (markup or sys.stdout.isatty()):
             if _stdout_console is None:
                 _stdout_console = Console(soft_wrap=True)
             _stdout_console.print(output_str, end="", markup=markup)
-        elif (markup or _stderr_isatty) and file is sys.stderr:
+        elif file is sys.stderr and (markup or sys.stderr.isatty()):
             if _stderr_console is None:
                 _stderr_console = Console(soft_wrap=True, stderr=True)
             _stderr_console.print(output_str, end="", markup=markup)
