@@ -27,7 +27,14 @@ def patch_func_code(func: Callable[P, T]) -> Callable[[Callable[[str], str]], Ca
     return decorator
 
 
+_debugpy_is_listening = False
+
+
 def debugpy(rank: int | None = None, port=5678):
+    global _debugpy_is_listening
+    if _debugpy_is_listening:
+        return
+
     from ladyrick.torch import rank as get_rank
 
     if rank is None or rank == get_rank():
@@ -45,7 +52,7 @@ def debugpy(rank: int | None = None, port=5678):
             debugpy._patched_breakpoint = _patched_breakpoint
 
         debugpy_module.listen(("0.0.0.0", int(port)))
-
+        _debugpy_is_listening = True
         rich_print(
             f"[green bold][debugpy] waiting for client to connect: ip is {get_local_ip()}, port is {port}[/green bold]",
             markup=True,
