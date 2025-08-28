@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ladyrick"
-version = "0.6.6"
+version = "0.6.7"
 authors = [{ name = "ladyrick", email = "ladyrick@qq.com" }]
 description = "ladyrick's tools"
 readme = "README.md"
@@ -20,7 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
-dependencies = ["rich", "ipython", "setproctitle>=1.3.5"]
+dependencies = ["rich", "ipython", "setproctitle>=1.3.5", "debugpy"]
 
 [project.urls]
 Homepage = "https://github.com/ladyrick/ladyrick-pip"
