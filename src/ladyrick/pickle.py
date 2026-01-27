@@ -19,34 +19,29 @@ class FakeClassMeta(type):
 
 
 class FakeClass(metaclass=FakeClassMeta):
-    __load_method__ = "__dict__"
-
     def __new__(cls, *args, **kwargs):
         instance = super().__new__(cls)
-        cls.__load_method__ = "__new__"
-        setattr(instance, "__args", args)
-        setattr(instance, "__kwargs", kwargs)
+        instance.args = args
+        instance.kwargs = kwargs
+        instance.state = None
         return instance
 
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+        self.state = None
+
     def __repr__(self):
-        if self.__class__.__load_method__ == "__new__":
-            args = getattr(self, "__args")
-            kwargs = getattr(self, "__kwargs")
-        elif self.__class__.__load_method__ == "__dict__":
-            args = ()
-            kwargs = vars(self)
-        else:
-            args = ()
-            kwargs = {"state": self.state}
         comps = []
-        if args:
-            comps += [repr(a) for a in args]
-        if kwargs:
-            comps += [f"{k}={v!r}" for k, v in kwargs.items()]
+        if self.args:
+            comps += [repr(a) for a in self.args]
+        if self.kwargs:
+            comps += [f"{k}={v!r}" for k, v in self.kwargs.items()]
+        if self.state is not None:
+            comps.append(f"state={self.state!r}")
         return f"{class_name(self)}({', '.join(comps)})"
 
     def __setstate__(self, state):
-        self.__class__.__load_method__ = "__setstate__"
         self.state = state
 
     def __reduce__(self):

@@ -11,6 +11,7 @@ import typing
 from setproctitle import getproctitle, setproctitle
 
 from ladyrick.loader import FORMATS, auto_load
+from ladyrick.pickle import FakeClass
 from ladyrick.print_utils import rich_print
 from ladyrick.utils import class_name
 
@@ -229,6 +230,34 @@ class Printer:
         stream.write(f"{r[:-1]} ...{len(obj) - 100} more{r[-1]}")
 
     _dispatch[is_long_str] = format_long_str
+
+    def is_fake_class(self, obj):
+        return isinstance(obj, FakeClass)
+
+    def format_fake_class(self, obj: FakeClass, stream: Writable, level: int):
+        stream.write(f"{obj.__class__.__name__}(")
+        if obj.args or obj.kwargs or obj.state is not None:
+            stream.write("\n")
+        if obj.args:
+            for arg in obj.args:
+                stream.write(f"{self.indent * (level + 1)}")
+                self.format_object(arg, stream, level + 1)
+                stream.write(",\n")
+
+        if obj.kwargs:
+            for k, v in obj.kwargs.items():
+                stream.write(f"{self.indent * (level + 1)}")
+                stream.write(f"{k}=")
+                self.format_object(arg, stream, level + 1)
+                stream.write(",\n")
+        if obj.state is not None:
+            stream.write(f"{self.indent * (level + 1)}")
+            stream.write("state=")
+            self.format_object(obj.state, stream, level + 1)
+            stream.write(",\n")
+        stream.write(f"{self.indent * level})")
+
+    _dispatch[is_fake_class] = format_fake_class
 
 
 class FakeRichStream:
