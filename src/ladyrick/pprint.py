@@ -235,7 +235,7 @@ class Printer:
                 has_indent = True
                 stream.write(f"\n{child_ind}")
                 stream.write(f"{k}=")
-                self.format_object(arg, stream, level + 1)
+                self.format_object(v, stream, level + 1)
                 stream.write(",")
         if obj.state is not None:
             has_indent = True
