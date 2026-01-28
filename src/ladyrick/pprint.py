@@ -50,22 +50,32 @@ class Printer:
         if level == 0:
             stream.write("\n")
 
+    def _format_kv(self, kv_iterable, stream: Writable, level: int, dict_style=False):
+        has_indent = False
+        cur_level_indent = self.indent * (level + 1)
+        for k, v in kv_iterable:
+            has_indent = True
+            if dict_style:
+                stream.write(f"\n{cur_level_indent}{k!r}: ")
+            else:
+                stream.write(f"\n{cur_level_indent}{k}=")
+            self.format_object(v, stream, level + 1)
+            stream.write(",")
+        if has_indent:
+            stream.write(f"\n{self.indent * level}")
+
     def is_map(self, obj):
         return isinstance(obj, typing.Mapping)
 
     def format_map(self, obj, stream: Writable, level: int):
-        class_name = obj.__class__.__name__
-        if class_name == "dict":
+        classname = obj.__class__.__name__
+        if classname == "dict":
             stream.write("{")
         else:
-            stream.write(f"{class_name}({{")
-        for k, v in obj.items():
-            stream.write(f"\n{self.indent * (level + 1)}{k!r}: ")
-            self.format_object(v, stream, level + 1)
-            stream.write(",")
-        if obj:
-            stream.write(f"\n{self.indent * level}")
-        if class_name == "dict":
+            stream.write(f"{classname}({{")
+
+        self._format_kv(obj.items(), stream, level, dict_style=True)
+        if classname == "dict":
             stream.write("}")
         else:
             stream.write("})")
@@ -107,45 +117,26 @@ class Printer:
         return isinstance(obj, tuple) and hasattr(obj, "_fields")
 
     def format_namedtuple(self, obj, stream: Writable, level: int):
-        stream.write(f"{obj.__class__.__name__}(\n")
-        for k, v in zip(obj._fields, obj):
-            stream.write(f"{self.indent * (level + 1)}{k}=")
-            self.format_object(v, stream, level + 1)
-            stream.write(",\n")
-        stream.write(f"{self.indent * level})")
+        stream.write(f"{obj.__class__.__name__}(")
+        self._format_kv(zip(obj._fields, obj), stream, level)
+        stream.write(")")
 
     _dispatch[is_namedtuple] = format_namedtuple  # must before is_simple_sequence
 
     def is_simple_sequence(self, obj):
-        return isinstance(obj, (list, tuple, set))
+        return obj.__class__ in (list, tuple, set)
 
     def format_simple_sequence(self, obj, stream: Writable, level: int):
-        class_name = obj.__class__.__name__
         if not obj:
-            if class_name in ("list", "tuple", "set"):
-                stream.write(f"{obj!r}")
-            elif isinstance(obj, list):
-                stream.write(f"{class_name}([])")
-            elif isinstance(obj, tuple):
-                stream.write(f"{class_name}(())")
-            else:  # set
-                stream.write(f"{class_name}(set())")
+            stream.write(f"{obj!r}")
             return
 
-        if class_name not in ("list", "tuple", "set"):
-            if isinstance(obj, list):
-                stream.write(f"{class_name}([")
-            elif isinstance(obj, tuple):
-                stream.write(f"{class_name}((")
-            else:  # set
-                stream.write(f"{class_name}({{")
-        else:
-            if isinstance(obj, list):
-                stream.write("[")
-            elif isinstance(obj, tuple):
-                stream.write("(")
-            else:  # set
-                stream.write("{")
+        if isinstance(obj, list):
+            stream.write("[")
+        elif isinstance(obj, tuple):
+            stream.write("(")
+        else:  # set
+            stream.write("{")
 
         last_type = None
         items_has_same_simple_type = True
@@ -192,20 +183,12 @@ class Printer:
                 stream.write(",\n")
             stream.write(self.indent * level)
 
-        if class_name not in ("list", "tuple", "set"):
-            if isinstance(obj, list):
-                stream.write("])")
-            elif isinstance(obj, tuple):
-                stream.write("))")
-            else:  # set
-                stream.write("}})")
-        else:
-            if isinstance(obj, list):
-                stream.write("]")
-            elif isinstance(obj, tuple):
-                stream.write(")")
-            else:  # set
-                stream.write("}")
+        if isinstance(obj, list):
+            stream.write("]")
+        elif isinstance(obj, tuple):
+            stream.write(")")
+        else:  # set
+            stream.write("}")
 
     _dispatch[is_simple_sequence] = format_simple_sequence
 
@@ -213,12 +196,9 @@ class Printer:
         return isinstance(obj, (argparse.Namespace, types.SimpleNamespace)) or dataclasses.is_dataclass(obj)
 
     def format_namespace(self, obj, stream: Writable, level: int):
-        stream.write(f"{obj.__class__.__name__}(\n")
-        for k, v in vars(obj).items():
-            stream.write(f"{self.indent * (level + 1)}{k}=")
-            self.format_object(v, stream, level + 1)
-            stream.write(",\n")
-        stream.write(f"{self.indent * level})")
+        stream.write(f"{obj.__class__.__name__}(")
+        self._format_kv(vars(obj).items(), stream, level)
+        stream.write(")")
 
     _dispatch[is_namespace] = format_namespace
 
@@ -235,27 +215,37 @@ class Printer:
         return isinstance(obj, FakeClass)
 
     def format_fake_class(self, obj: FakeClass, stream: Writable, level: int):
-        stream.write(f"{obj.__class__.__name__}(")
-        if obj.args or obj.kwargs or obj.state is not None:
-            stream.write("\n")
+        stream.write(f"<fake>{class_name(obj)}(")
+        single_args = len(obj.args or []) == 1 and not obj.kwargs and obj.state is None
+        if single_args:
+            self.format_object(obj.args[0], stream, level)
+            stream.write(")")
+            return
+        has_indent = False
+        child_ind = self.indent * (level + 1)
         if obj.args:
             for arg in obj.args:
-                stream.write(f"{self.indent * (level + 1)}")
+                has_indent = True
+                stream.write(f"\n{child_ind}")
                 self.format_object(arg, stream, level + 1)
-                stream.write(",\n")
+                stream.write(",")
 
         if obj.kwargs:
             for k, v in obj.kwargs.items():
-                stream.write(f"{self.indent * (level + 1)}")
+                has_indent = True
+                stream.write(f"\n{child_ind}")
                 stream.write(f"{k}=")
                 self.format_object(arg, stream, level + 1)
-                stream.write(",\n")
+                stream.write(",")
         if obj.state is not None:
-            stream.write(f"{self.indent * (level + 1)}")
+            has_indent = True
+            stream.write(f"\n{child_ind}")
             stream.write("state=")
             self.format_object(obj.state, stream, level + 1)
-            stream.write(",\n")
-        stream.write(f"{self.indent * level})")
+            stream.write(",")
+        if has_indent:
+            stream.write(f"\n{self.indent * level}")
+        stream.write(")")
 
     _dispatch[is_fake_class] = format_fake_class
 
