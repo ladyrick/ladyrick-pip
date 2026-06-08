@@ -4,6 +4,8 @@ import struct
 import sys
 import time
 
+from ladyrick.utils import recv_exact
+
 
 class AllGather:
     def __init__(self):
@@ -43,8 +45,8 @@ class AllGather:
             for worker_rank in range(1, self.world_size):
                 conn, _ = server_socket.accept()
                 conns.append(conn)
-                cur_data_len = struct.unpack("!I", conn.recv(4))[0]
-                cur_data = conn.recv(cur_data_len)
+                cur_data_len = struct.unpack("!I", recv_exact(conn, 4))[0]
+                cur_data = recv_exact(conn, cur_data_len)
                 all_data.append(cur_data)
 
             assert len(all_data) == self.world_size
@@ -76,9 +78,9 @@ class AllGather:
             worker_socket.sendall(data)
 
             all_data: list[bytes] = []
-            data_lens = struct.unpack("!" + "I" * self.world_size, worker_socket.recv(4 * self.world_size))
+            data_lens = struct.unpack("!" + "I" * self.world_size, recv_exact(worker_socket, 4 * self.world_size))
             for data_len in data_lens:
-                all_data.append(worker_socket.recv(data_len))
+                all_data.append(recv_exact(worker_socket, data_len))
         finally:
             worker_socket.close()
         return all_data

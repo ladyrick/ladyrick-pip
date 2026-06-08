@@ -25,6 +25,40 @@ class Writable(typing.Protocol):
         return 0
 
 
+class _LineCounter:
+    def __init__(self, stream):
+        self._stream = stream
+        self.lines = 0
+
+    def write(self, s, /):
+        self.lines += s.count("\n")
+        return self._stream.write(s)
+
+
+def resolve_attr(obj, attr_path: str):
+    """Resolve a dotted/indexed path. At each level tries getitem then getattr."""
+    _seg = re.compile(r"^([a-zA-Z_]\w*)?((?:\[\d+\])*)$")
+    _br = re.compile(r"\[(\d+)\]")
+    for segment in attr_path.split("."):
+        m = _seg.match(segment)
+        if not m:
+            raise AttributeError(f"invalid attribute path segment: {segment!r}")
+        name, bracket_part = m.group(1), m.group(2)
+        if name is None and not bracket_part:
+            raise AttributeError(f"empty segment in path {attr_path!r}")
+        if name:
+            try:
+                obj = obj[name]
+            except (KeyError, IndexError, TypeError):
+                try:
+                    obj = getattr(obj, name)
+                except (AttributeError, TypeError):
+                    raise AttributeError(f"object has no key or attribute {name!r}")
+        for m in _br.finditer(bracket_part):
+            obj = obj[int(m.group(1))]
+    return obj
+
+
 def get_tensor_data_repr(obj):
     match = re.match(r".*(tensor|array)\(([\[\]\n 0-9.eE+-ainf]+).*\)", repr(obj), re.DOTALL)
     assert match, repr(obj)
@@ -141,6 +175,7 @@ class Printer:
         last_type = None
         items_has_same_simple_type = True
         max_render_len = 10
+        max_render_lines = 1000
         for _, item in zip(range(max_render_len), obj):
             if item is not None and not isinstance(item, (int, float, complex, bool)):
                 items_has_same_simple_type = False
@@ -176,12 +211,18 @@ class Printer:
                 for i, item in enumerate(obj):
                     stream.write(f"{item!r}" if i == 0 else f", {item!r}")
         else:
-            stream.write("\n")
-            for item in obj:
-                stream.write(f"{self.indent * (level + 1)}")
-                self.format_object(item, stream, level + 1)
-                stream.write(",\n")
-            stream.write(self.indent * level)
+            line_counter_stream = _LineCounter(stream)
+            line_counter_stream.write("\n")
+            for i, item in enumerate(obj):
+                line_counter_stream.write(f"{self.indent * (level + 1)}")
+                self.format_object(item, line_counter_stream, level + 1)
+                line_counter_stream.write(",\n")
+                if line_counter_stream.lines > max_render_lines:
+                    remaining = len(obj) - i - 1
+                    if remaining:
+                        line_counter_stream.write(f"{self.indent * (level + 1)}...({remaining} more items)\n")
+                    break
+            line_counter_stream.write(f"{self.indent * level}")
 
         if isinstance(obj, list):
             stream.write("]")
@@ -302,6 +343,7 @@ def main():
         parser.add_argument("files", nargs="*")
         parser.add_argument("-e", "--ignore-errors", action="store_true")
         parser.add_argument("-r", "--raw", action="store_true", help="no map_location")
+        parser.add_argument("-a", "--attr", type=str, help="extract and print a specific attribute")
         parser.add_argument("-f", "--format", choices=FORMATS, default=FORMATS[0])
         args = parser.parse_args()
         if not args.files and not args.i:
@@ -342,11 +384,28 @@ def main():
     if len(models) == 1:
         add_to_globals["path"] = paths[0]
         add_to_globals["model"] = models[0]
-        pretty_print(models[0])
+        model = models[0]
+        if args.attr and not isinstance(model, load_failed):
+            try:
+                display_obj = resolve_attr(model, args.attr)
+            except Exception as e:
+                rich_print(f"[red]Cannot get attribute '{args.attr}': {e}[/red]", markup=True)
+            else:
+                pretty_print(display_obj)
+        else:
+            pretty_print(model)
     else:
         for file, model in zip(paths, models):
             print(file)
-            pretty_print(model)
+            if args.attr and not isinstance(model, load_failed):
+                try:
+                    display_obj = resolve_attr(model, args.attr)
+                except Exception as e:
+                    rich_print(f"[red]Cannot get attribute '{args.attr}': {e}[/red]", markup=True)
+                else:
+                    pretty_print(display_obj)
+            else:
+                pretty_print(model)
     if interactive_mode:
         if "torch" in sys.modules:
             add_to_globals["torch"] = sys.modules["torch"]

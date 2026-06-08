@@ -115,7 +115,11 @@ class Vars:
         raise AttributeError(k)
 
     __setattr__ = __setitem__
-    __delattr__ = __delitem__
+
+    def __delattr__(self, k: str):
+        if k in self._data:
+            del self._data[k]
+        raise AttributeError(k)
 
     @contextmanager
     def ctx(self, k: str, v: T) -> Generator[T, None, None]:

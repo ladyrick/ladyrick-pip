@@ -2,7 +2,7 @@ import argparse
 import atexit
 import fcntl
 import hashlib
-import importlib.metadata
+import hmac
 import os
 import pty
 import secrets
@@ -15,8 +15,10 @@ import termios
 import threading
 import time
 import tty
+from pathlib import Path
 
 from ladyrick.print_utils import rich_print
+from ladyrick.utils import recv_exact
 
 
 def no_exc(f, *args, **kwargs):
@@ -43,7 +45,7 @@ def set_terminal_size(fd: int, row: int, col: int, xpix=0, ypix=0):
 
 class forward_terminal:
     salt = b'#`L|A:\xc1\n\xe2gV\xbcD\xe7\x8c\x82\xd18}\xe9\xdc\x13\x1e\x8c"\x0ej1\x1cb\xe4)'
-    salt += importlib.metadata.version("ladyrick").encode()
+    salt += Path(__file__).read_bytes()
 
     def __init__(self, port=8765, secret: str | None = None):
         self.port = port
@@ -73,7 +75,7 @@ class forward_terminal:
             self.conn, _ = self.sock.accept()
             recv_secret = self.conn.recv(len(secret_compare))
             time.sleep(0.5)
-            if secret_compare == recv_secret:
+            if hmac.compare_digest(secret_compare, recv_secret):
                 self.conn.send(b"<correct/>\n")
                 break
             else:
@@ -81,7 +83,7 @@ class forward_terminal:
                 self.conn.close()
 
         # get initial window size
-        data = self.conn.recv(4)
+        data = recv_exact(self.conn, 4)
         rows, cols = struct.unpack("!HH", data)
 
         self.master_fd, self.slave_fd = pty.openpty()
@@ -189,7 +191,7 @@ class forward_terminal:
         winsize_begin, winsize_end = b"<winsize " + secret_hash + b">", b"</winsize>\n"
 
         result = sock.recv(11)
-        if result == b"<wrong/>\n":
+        if result != b"<correct/>\n":
             print("secret is wrong or version mismatch.")
             return
 

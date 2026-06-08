@@ -68,3 +68,18 @@ def get_local_ip() -> str:
         return local_ip
     except Exception:
         return "127.0.0.1"
+
+
+def recv_exact(sock: socket.socket, n: int) -> bytes:
+    """Receive exactly n bytes from a socket, or raise ConnectionError on early EOF."""
+    if n == 0:
+        return b""
+    chunks: list[bytes] = []
+    remaining = n
+    while remaining > 0:
+        chunk = sock.recv(remaining)
+        if not chunk:
+            raise ConnectionError(f"Connection closed while expecting {n} bytes, got {n - remaining}")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
